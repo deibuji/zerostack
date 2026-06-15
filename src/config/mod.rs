@@ -167,6 +167,8 @@ pub struct Config {
     #[cfg(feature = "subagents")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subagent_provider: Option<CompactString>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_mode: Option<types::InputMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub colors: Option<types::ColorsConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]

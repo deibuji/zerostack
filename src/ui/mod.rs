@@ -110,6 +110,7 @@ fn refresh_display(
         &status,
         chain_badge.as_deref(),
         is_running,
+        &input.mode_label,
     )?;
     if let Some(ref mut picker) = input.picker {
         picker.draw()?;
@@ -437,7 +438,8 @@ pub async fn run_interactive(
         let status_bg = colors.status_background.as_deref().and_then(parse_color);
         renderer.set_background_colors(chat_bg, input_bg, status_bg);
     }
-    let mut input = InputEditor::new();
+    let input_mode = cli.resolve_input_mode(cfg);
+    let mut input = InputEditor::new(input_mode);
     input.set_monochrome(cli.no_color);
     input.set_prompt_names(context.prompts.keys().cloned().collect());
     input.set_theme_names(context.themes.keys().cloned().collect());
@@ -1512,7 +1514,7 @@ pub async fn run_interactive(
                             refresh_display(&mut renderer, &mut input, session, is_running, loop_label.as_deref(), context.current_prompt_name.as_deref(), perm_mode().as_deref(), chain_label_msg.as_deref(), btw_total_cost, btw_total_in, btw_total_out)?;
                         } else {
                             let (status, chain_badge) = StatusLine::render(session, is_running, 0, loop_label.as_deref(), context.current_prompt_name.as_deref(), perm_mode().as_deref(), chain_label_msg.as_deref(), btw_total_cost, btw_total_in, btw_total_out);
-                            renderer.draw_bottom(&input.buffer, input.cursor, &status, chain_badge.as_deref(), is_running)?;
+                            renderer.draw_bottom(&input.buffer, input.cursor, &status, chain_badge.as_deref(), is_running, &input.mode_label)?;
                             if let Some(ref mut picker) = input.picker {
                                 picker.draw()?;
                             }

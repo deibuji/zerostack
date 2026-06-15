@@ -113,6 +113,13 @@ pub struct Cli {
     pub shell: Option<String>,
 
     #[arg(
+        long = "input-mode",
+        value_parser = ["emacs", "vi"],
+        help = "Input mode: emacs (default) or vi"
+    )]
+    pub input_mode: Option<String>,
+
+    #[arg(
         long = "edit-system",
         help = "Edit system (similarity or hashedit). Default: similarity"
     )]
@@ -319,6 +326,14 @@ impl Cli {
             .clone()
             .or_else(|| cfg.shell.clone())
             .unwrap_or_else(|| "bash".to_string())
+    }
+
+    pub fn resolve_input_mode(&self, cfg: &config::Config) -> crate::config::types::InputMode {
+        self.input_mode
+            .as_deref()
+            .and_then(|s| s.parse().ok())
+            .or(cfg.input_mode)
+            .unwrap_or_default()
     }
 
     pub fn resolve_edit_system(&self, cfg: &config::Config) -> EditSystem {

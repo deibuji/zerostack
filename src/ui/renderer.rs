@@ -594,6 +594,7 @@ impl Renderer {
         status: &str,
         chain_badge: Option<&str>,
         is_running: bool,
+        mode_label: &str,
     ) -> io::Result<()> {
         let (cols, rows) = crossterm::terminal::size()?;
         let mut stdout = io::stdout();
@@ -820,6 +821,8 @@ impl Renderer {
             let frame = SPINNER[self.spinner_frame as usize];
             self.spinner_frame = (self.spinner_frame + 1) % SPINNER.len() as u8;
             frame
+        } else if !mode_label.is_empty() {
+            mode_label
         } else {
             "> "
         };

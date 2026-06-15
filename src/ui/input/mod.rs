@@ -11,15 +11,23 @@ use compact_str::CompactString;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::io::Write;
 
+use crate::config::types::InputMode;
 use crate::ui::pickers::file::FilePicker;
 use crate::ui::pickers::list::ListPicker;
 use crate::ui::pickers::models::ModelsPicker;
 
 const MAX_KILL_RING: usize = 30;
 
+#[cfg(feature = "vi-mode")]
+mod vi;
+#[cfg(feature = "vi-mode")]
+use vi::*;
+
 pub struct InputEditor {
     pub buffer: CompactString,
     pub cursor: usize,
+    pub input_mode: InputMode,
+    pub mode_label: compact_str::CompactString,
     history: Vec<CompactString>,
     history_pos: Option<usize>,
     draft: Option<CompactString>,
@@ -34,13 +42,17 @@ pub struct InputEditor {
     kill_ring: Vec<CompactString>,
     yank_pos: Option<usize>,
     yank_len: usize,
+    #[cfg(feature = "vi-mode")]
+    vi_state: ViState,
 }
 
 impl InputEditor {
-    pub fn new() -> Self {
+    pub fn new(input_mode: InputMode) -> Self {
         InputEditor {
             buffer: CompactString::new(""),
             cursor: 0,
+            input_mode,
+            mode_label: compact_str::CompactString::new("> "),
             history: Vec::new(),
             history_pos: None,
             draft: None,
@@ -55,6 +67,8 @@ impl InputEditor {
             kill_ring: Vec::with_capacity(MAX_KILL_RING),
             yank_pos: None,
             yank_len: 0,
+            #[cfg(feature = "vi-mode")]
+            vi_state: ViState::new(),
         }
     }
 
@@ -233,6 +247,14 @@ impl InputEditor {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<CompactString> {
+        #[cfg(feature = "vi-mode")]
+        if self.input_mode == InputMode::Vi {
+            return self.handle_vi_key(key);
+        }
+        self.handle_key_impl(key)
+    }
+
+    fn handle_key_impl(&mut self, key: KeyEvent) -> Option<CompactString> {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
 
@@ -739,5 +761,898 @@ impl InputEditor {
         new_buf.push_str(after);
         self.buffer = CompactString::new(&new_buf);
         deleted
+    }
+
+    // ---- VI mode handlers ----
+
+    #[cfg(feature = "vi-mode")]
+    fn update_vi_mode_label(&mut self) {
+        self.mode_label = compact_str::CompactString::from(match self.vi_state.mode {
+            ViMode::Insert => "-- INSERT --",
+            ViMode::Normal => "-- NORMAL --",
+            ViMode::Visual(VisualType::Char) => "-- VISUAL --",
+            ViMode::Visual(VisualType::Line) => "-- VISUAL LINE --",
+            ViMode::Visual(VisualType::Block) => "-- VISUAL BLOCK --",
+            ViMode::CommandLine => ":",
+            ViMode::SearchForward => "/",
+            ViMode::SearchBackward => "?",
+        });
+    }
+
+    #[cfg(feature = "vi-mode")]
+    fn save_vi_undo_point(&mut self) {
+        self.vi_state.insert_start_buf = self.buffer.clone();
+        self.vi_state.insert_start_cursor = self.cursor;
+    }
+
+    #[cfg(feature = "vi-mode")]
+    fn handle_vi_key(&mut self, key: KeyEvent) -> Option<CompactString> {
+        if self.picker.as_ref().is_some_and(|p| p.active()) {
+            return self.handle_key_impl(key);
+        }
+        match self.vi_state.mode {
+            ViMode::Insert => self.handle_vi_insert_key(key),
+            ViMode::Normal => self.handle_vi_normal_key(key),
+            ViMode::Visual(_) => self.handle_vi_visual_key(key),
+            ViMode::CommandLine => self.handle_vi_cmdline_key(key),
+            ViMode::SearchForward | ViMode::SearchBackward => self.handle_vi_search_key(key),
+        }
+    }
+
+    #[cfg(feature = "vi-mode")]
+    fn handle_vi_insert_key(&mut self, key: KeyEvent) -> Option<CompactString> {
+        if key.code == KeyCode::Esc
+            || (key.code == KeyCode::Char('[')
+                && key.modifiers.contains(KeyModifiers::CONTROL))
+        {
+            let old_buf = std::mem::replace(&mut self.vi_state.insert_start_buf, self.buffer.clone());
+            let old_cursor = self.vi_state.insert_start_cursor;
+            self.vi_state
+                .push_undo(&old_buf, &self.buffer, old_cursor, self.cursor);
+            self.vi_state.last_insert = Some(self.buffer[old_cursor..self.cursor].into());
+            self.vi_state.mode = ViMode::Normal;
+            self.vi_state.pending_op = None;
+            self.update_vi_mode_label();
+            None
+        } else {
+            self.handle_key_impl(key)
+        }
+    }
+
+    #[cfg(feature = "vi-mode")]
+    fn handle_vi_normal_key(&mut self, key: KeyEvent) -> Option<CompactString> {
+        if self.vi_state.pending_g {
+            self.vi_state.pending_g = false;
+            return match key.code {
+                KeyCode::Char('g') => {
+                    self.apply_vi_motion_or_op("gg");
+                    None
+                }
+                _ => None,
+            };
+        }
+
+        if self.vi_state.pending_fchar_dir.is_some() {
+            let dir = self.vi_state.pending_fchar_dir.take();
+            if let KeyCode::Char(c) = key.code {
+                self.vi_state.last_fchar = Some(c);
+                self.vi_state.last_fchar_dir = dir;
+                let motion = match dir {
+                    Some(Direction::Forward) => "f",
+                    Some(Direction::Backward) => "F",
+                    _ => "f",
+                };
+                self.apply_vi_motion_or_op(motion);
+            }
+            return None;
+        }
+
+        // Handle register prefix: "x waits for register char
+        if self.vi_state.pending_register.is_some()
+            && matches!(key.code, KeyCode::Char('a'..='z') | KeyCode::Char('0'..='9') | KeyCode::Char('"') | KeyCode::Char('+'))
+        {
+            if let KeyCode::Char(c) = key.code {
+                self.vi_state.pending_register = Some(c);
+            }
+            // Don't execute yet — wait for the actual command
+            return None;
+        }
+
+        // Handle pending text object prefix (i/a after operator)
+        if self.vi_state.pending_text_object {
+            self.vi_state.pending_text_object = false;
+            // For now, just clear pending_op — we don't implement text objects here
+            self.vi_state.pending_op = None;
+            return None;
+        }
+
+        match key.code {
+            KeyCode::Esc => {
+                self.vi_state.pending_op = None;
+                self.vi_state.pending_count = 0;
+                self.vi_state.pending_register = None;
+                self.vi_state.pending_text_object = false;
+                self.vi_state.pending_g = false;
+                None
+            }
+
+            // ---- Motions ----
+            KeyCode::Char('h') | KeyCode::Left => {
+                self.apply_vi_motion_or_op("h");
+                None
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.apply_vi_motion_or_op("j");
+                None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.apply_vi_motion_or_op("k");
+                None
+            }
+            KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => {
+                self.apply_vi_motion_or_op("l");
+                None
+            }
+            KeyCode::Char('w') => {
+                self.apply_vi_motion_or_op("w");
+                None
+            }
+            KeyCode::Char('b') => {
+                self.apply_vi_motion_or_op("b");
+                None
+            }
+            KeyCode::Char('e') => {
+                self.apply_vi_motion_or_op("e");
+                None
+            }
+            KeyCode::Char('W') => {
+                self.apply_vi_motion_or_op("W");
+                None
+            }
+            KeyCode::Char('B') => {
+                self.apply_vi_motion_or_op("B");
+                None
+            }
+            KeyCode::Char('E') => {
+                self.apply_vi_motion_or_op("E");
+                None
+            }
+            KeyCode::Char('0') => {
+                if self.vi_state.pending_count == 0 {
+                    self.apply_vi_motion_or_op("0");
+                } else {
+                    self.vi_state.pending_count *= 10;
+                }
+                None
+            }
+            KeyCode::Char('$') | KeyCode::End => {
+                self.apply_vi_motion_or_op("$");
+                None
+            }
+            KeyCode::Char('^') => {
+                self.apply_vi_motion_or_op("^");
+                None
+            }
+            KeyCode::Home => {
+                self.apply_vi_motion_or_op("home");
+                None
+            }
+            KeyCode::Char('G') => {
+                self.apply_vi_motion_or_op("G");
+                None
+            }
+            KeyCode::Char('{') => {
+                self.apply_vi_motion_or_op("{");
+                None
+            }
+            KeyCode::Char('}') => {
+                self.apply_vi_motion_or_op("}");
+                None
+            }
+            KeyCode::Char('%') => {
+                self.apply_vi_motion_or_op("%");
+                None
+            }
+            KeyCode::Char(';') => {
+                self.apply_vi_motion_or_op(";");
+                None
+            }
+            KeyCode::Char(',') => {
+                self.apply_vi_motion_or_op(",");
+                None
+            }
+
+            // ---- Text object prefix (i/a after operator) ----
+            KeyCode::Char('i') if self.vi_state.pending_op.is_some() => {
+                self.vi_state.pending_text_object = true;
+                None
+            }
+            KeyCode::Char('a') if self.vi_state.pending_op.is_some() => {
+                self.vi_state.pending_text_object = true;
+                None
+            }
+
+            // ---- Enter insert ----
+            KeyCode::Char('i') => {
+                self.save_vi_undo_point();
+                self.vi_state.mode = ViMode::Insert;
+                self.update_vi_mode_label();
+                None
+            }
+            KeyCode::Char('I') => {
+                self.save_vi_undo_point();
+                self.cursor = ViState::first_non_whitespace(&self.buffer, self.cursor);
+                self.vi_state.mode = ViMode::Insert;
+                self.update_vi_mode_label();
+                None
+            }
+            KeyCode::Char('a') => {
+                self.save_vi_undo_point();
+                if self.cursor < self.buffer.len() {
+                    self.cursor = next_char_boundary(&self.buffer, self.cursor);
+                }
+                self.vi_state.mode = ViMode::Insert;
+                self.update_vi_mode_label();
+                None
+            }
+            KeyCode::Char('A') => {
+                self.save_vi_undo_point();
+                self.cursor = self.buffer.len();
+                self.vi_state.mode = ViMode::Insert;
+                self.update_vi_mode_label();
+                None
+            }
+            KeyCode::Char('o') => {
+                self.save_vi_undo_point();
+                self.buffer.insert(self.cursor, '\n');
+                self.cursor += 1;
+                self.vi_state.mode = ViMode::Insert;
+                self.update_vi_mode_label();
+                None
+            }
+            KeyCode::Char('O') => {
+                self.save_vi_undo_point();
+                let (_line, _) = cursor_to_line_col(&self.buffer, self.cursor);
+                let start = line_start(&self.buffer, self.cursor);
+                self.buffer.insert(start, '\n');
+                self.cursor = start;
+                self.vi_state.mode = ViMode::Insert;
+                self.update_vi_mode_label();
+                None
+            }
+            KeyCode::Char('s') => {
+                self.save_vi_undo_point();
+                self.vi_state.pending_op = Some(ViOperator::Change);
+                self.apply_vi_motion_or_op("l");
+                self.vi_state.mode = ViMode::Insert;
+                self.update_vi_mode_label();
+                None
+            }
+            KeyCode::Char('S') => {
+                self.save_vi_undo_point();
+                self.vi_state.pending_op = Some(ViOperator::Change);
+                self.apply_vi_motion_or_op("_");
+                self.vi_state.mode = ViMode::Insert;
+                self.update_vi_mode_label();
+                None
+            }
+            KeyCode::Char('C') => {
+                self.save_vi_undo_point();
+                self.vi_state.pending_op = Some(ViOperator::Change);
+                self.apply_vi_motion_or_op("$");
+                self.vi_state.mode = ViMode::Insert;
+                self.update_vi_mode_label();
+                None
+            }
+            KeyCode::Char('D') => {
+                self.save_vi_undo_point();
+                self.vi_state.pending_op = Some(ViOperator::Delete);
+                self.apply_vi_motion_or_op("$");
+                None
+            }
+
+            // ---- Operators ----
+            KeyCode::Char('d') => {
+                if let Some(ViOperator::Delete) = self.vi_state.pending_op {
+                    // dd
+                    self.vi_state.pending_op = None;
+                    self.save_vi_undo_point();
+                    self.apply_vi_operator("_");
+                } else {
+                    self.vi_state.pending_op = Some(ViOperator::Delete);
+                }
+                None
+            }
+            KeyCode::Char('y') => {
+                if let Some(ViOperator::Yank) = self.vi_state.pending_op {
+                    self.vi_state.pending_op = None;
+                    self.save_vi_undo_point();
+                    self.apply_vi_operator("_");
+                } else {
+                    self.vi_state.pending_op = Some(ViOperator::Yank);
+                }
+                None
+            }
+            KeyCode::Char('c') => {
+                if let Some(ViOperator::Change) = self.vi_state.pending_op {
+                    self.vi_state.pending_op = None;
+                    self.save_vi_undo_point();
+                    self.apply_vi_operator("_");
+                    self.vi_state.mode = ViMode::Insert;
+                    self.update_vi_mode_label();
+                } else {
+                    self.vi_state.pending_op = Some(ViOperator::Change);
+                }
+                None
+            }
+            KeyCode::Char('>') => {
+                if let Some(ViOperator::IndentRight) = self.vi_state.pending_op {
+                    self.vi_state.pending_op = None;
+                    self.save_vi_undo_point();
+                    self.apply_vi_operator("_");
+                } else {
+                    self.vi_state.pending_op = Some(ViOperator::IndentRight);
+                }
+                None
+            }
+            KeyCode::Char('<') => {
+                if let Some(ViOperator::IndentLeft) = self.vi_state.pending_op {
+                    self.vi_state.pending_op = None;
+                    self.save_vi_undo_point();
+                    self.apply_vi_operator("_");
+                } else {
+                    self.vi_state.pending_op = Some(ViOperator::IndentLeft);
+                }
+                None
+            }
+
+            // ---- Other commands ----
+            KeyCode::Char('X') => {
+                self.save_vi_undo_point();
+                if self.cursor > 0 {
+                    let saved = self.cursor;
+                    let old_buf = self.vi_state.insert_start_buf.clone();
+                    self.cursor = prev_char_boundary(&self.buffer, self.cursor);
+                    self.buffer.remove(self.cursor);
+                    self.vi_state
+                        .push_undo(&old_buf, &self.buffer, saved, self.cursor);
+                }
+                None
+            }
+            KeyCode::Char('p') => {
+                self.save_vi_undo_point();
+                let text = self
+                    .vi_state
+                    .pending_register
+                    .and_then(|r| self.vi_state.registers.get(r).map(|s| s.to_string()))
+                    .unwrap_or_else(|| self.vi_state.registers.get('"').unwrap_or("").to_string());
+                self.vi_state.pending_register = None;
+                if !text.is_empty() {
+                    self.cursor += 1;
+                    self.buffer.insert_str(self.cursor, &text);
+                    self.cursor += text.len();
+                }
+                None
+            }
+            KeyCode::Char('P') => {
+                self.save_vi_undo_point();
+                let text = self
+                    .vi_state
+                    .pending_register
+                    .and_then(|r| self.vi_state.registers.get(r).map(|s| s.to_string()))
+                    .unwrap_or_else(|| self.vi_state.registers.get('"').unwrap_or("").to_string());
+                self.vi_state.pending_register = None;
+                if !text.is_empty() {
+                    self.buffer.insert_str(self.cursor, &text);
+                    self.cursor += text.len();
+                }
+                None
+            }
+            KeyCode::Char('u') => {
+                if let Some(entry) = self.vi_state.undo_stack.pop() {
+                    let redo = UndoEntry {
+                        old_buffer: entry.new_buffer.clone(),
+                        new_buffer: entry.old_buffer.clone(),
+                        old_cursor: entry.new_cursor,
+                        new_cursor: entry.old_cursor,
+                    };
+                    if self.vi_state.redo_stack.len() >= 100 {
+                        self.vi_state.redo_stack.remove(0);
+                    }
+                    self.vi_state.redo_stack.push(redo);
+                    self.buffer = entry.old_buffer;
+                    self.cursor = entry.old_cursor;
+                }
+                None
+            }
+            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some(entry) = self.vi_state.redo_stack.pop() {
+                    let undo = UndoEntry {
+                        old_buffer: entry.old_buffer.clone(),
+                        new_buffer: entry.new_buffer.clone(),
+                        old_cursor: entry.old_cursor,
+                        new_cursor: entry.new_cursor,
+                    };
+                    if self.vi_state.undo_stack.len() >= 100 {
+                        self.vi_state.undo_stack.remove(0);
+                    }
+                    self.vi_state.undo_stack.push(undo);
+                    self.buffer = entry.new_buffer;
+                    self.cursor = entry.new_cursor;
+                }
+                None
+            }
+            KeyCode::Char('J') => {
+                self.save_vi_undo_point();
+                // Join next line: replace newline with space
+                let rest = &self.buffer[self.cursor..];
+                if let Some(nl_pos) = rest.find('\n') {
+                    let abs_pos = self.cursor + nl_pos;
+                    self.buffer.remove(abs_pos);
+                    if abs_pos < self.buffer.len() && !self.buffer[abs_pos..].starts_with(' ') {
+                        self.buffer.insert(abs_pos, ' ');
+                        self.cursor = abs_pos + 1;
+                    } else {
+                        self.cursor = abs_pos;
+                    }
+                }
+                None
+            }
+            KeyCode::Char('~') => {
+                self.save_vi_undo_point();
+                if self.cursor < self.buffer.len() {
+                    let c = self.buffer[self.cursor..].chars().next().unwrap();
+                    let toggled: String = if c.is_uppercase() {
+                        c.to_lowercase().collect()
+                    } else {
+                        c.to_uppercase().collect()
+                    };
+                    let before: String = self.buffer.chars().take(self.cursor).collect();
+                    let after: String = self.buffer.chars().skip(self.cursor + 1).collect();
+                    self.buffer = CompactString::new(format!("{}{}{}", before, toggled, after));
+                    self.cursor = next_char_boundary(&self.buffer, self.cursor);
+                }
+                None
+            }
+            KeyCode::Char('.') => {
+                if let Some(ref repeat) = self.vi_state.repeat.clone() {
+                    match &repeat.op {
+                        RepeatOp::Change(..) => {
+                            self.save_vi_undo_point();
+                            self.buffer = repeat.text.clone();
+                            self.cursor = repeat.cursor;
+                        }
+                        RepeatOp::Delete(saved_cursor, saved_len) => {
+                            self.save_vi_undo_point();
+                            let end = *saved_cursor + saved_len;
+                            if end <= self.buffer.len() {
+                                let mut s = String::with_capacity(self.buffer.len() - saved_len);
+                                s.push_str(&self.buffer[..*saved_cursor]);
+                                s.push_str(&self.buffer[end..]);
+                                self.buffer = CompactString::new(&s);
+                                self.cursor = *saved_cursor;
+                            }
+                        }
+                        RepeatOp::Paste => {
+                            let text = self
+                                .vi_state
+                                .registers
+                                .get('"')
+                                .unwrap_or("")
+                                .to_string();
+                            if !text.is_empty() {
+                                self.cursor += 1;
+                                self.buffer.insert_str(self.cursor, &text);
+                                self.cursor += text.len();
+                            }
+                        }
+                    }
+                }
+                None
+            }
+            KeyCode::Char('"') => {
+                self.vi_state.pending_register = Some('"'); // will be overwritten by next char
+                None
+            }
+            KeyCode::Char('m') => {
+                // Set mark: wait for next char a-z
+                // For now, store at marks[0] as placeholder
+                None
+            }
+            KeyCode::Char('\'') | KeyCode::Char('`') => {
+                // Jump to mark: wait for next char
+                None
+            }
+
+            // ---- Visual mode ----
+            KeyCode::Char('v') => {
+                self.vi_state.visual_start = self.cursor;
+                self.vi_state.mode = ViMode::Visual(VisualType::Char);
+                self.update_vi_mode_label();
+                None
+            }
+            KeyCode::Char('V') => {
+                self.vi_state.visual_start = self.cursor;
+                self.vi_state.mode = ViMode::Visual(VisualType::Line);
+                self.update_vi_mode_label();
+                None
+            }
+
+            // ---- Command line / search ----
+            KeyCode::Char(':') => {
+                self.vi_state.cmdline_buffer = CompactString::new("");
+                self.vi_state.cmdline_cursor = 0;
+                self.vi_state.mode = ViMode::CommandLine;
+                self.update_vi_mode_label();
+                None
+            }
+            KeyCode::Char('/') => {
+                self.vi_state.cmdline_buffer = CompactString::new("");
+                self.vi_state.cmdline_cursor = 0;
+                self.vi_state.mode = ViMode::SearchForward;
+                self.update_vi_mode_label();
+                None
+            }
+            KeyCode::Char('?') => {
+                self.vi_state.cmdline_buffer = CompactString::new("");
+                self.vi_state.cmdline_cursor = 0;
+                self.vi_state.mode = ViMode::SearchBackward;
+                self.update_vi_mode_label();
+                None
+            }
+
+            // ---- g prefix ----
+            KeyCode::Char('g') => {
+                self.vi_state.pending_g = true;
+                None
+            }
+
+            // ---- f/F/t/T prefix ----
+            KeyCode::Char('f') => {
+                self.vi_state.pending_fchar_dir = Some(Direction::Forward);
+                None
+            }
+            KeyCode::Char('F') => {
+                self.vi_state.pending_fchar_dir = Some(Direction::Backward);
+                None
+            }
+            KeyCode::Char('t') => {
+                // For t/T, we'd need a separate mechanism. Skip for now.
+                self.vi_state.pending_fchar_dir = Some(Direction::Forward);
+                None
+            }
+            KeyCode::Char('T') => {
+                self.vi_state.pending_fchar_dir = Some(Direction::Backward);
+                None
+            }
+
+            // ---- Count digits ----
+            KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+                self.vi_state.pending_count =
+                    self.vi_state.pending_count * 10 + (c as u32 - b'0' as u32);
+                None
+            }
+
+            // ---- n/N for search repeat ----
+            KeyCode::Char('n') => {
+                if self.vi_state.last_search.is_some() {
+                    // Simple forward search
+                    let search = self.vi_state.last_search.as_deref().unwrap_or("");
+                    if let Some(pos) = self.buffer[self.cursor + 1..].find(search) {
+                        self.cursor = self.cursor + 1 + pos;
+                    }
+                }
+                None
+            }
+            KeyCode::Char('N') => {
+                if self.vi_state.last_search.is_some() {
+                    let search = self.vi_state.last_search.as_deref().unwrap_or("");
+                    if let Some(pos) = self.buffer[..self.cursor].rfind(search) {
+                        self.cursor = pos;
+                    }
+                }
+                None
+            }
+
+            _ => {
+                self.vi_state.pending_op = None;
+                self.vi_state.pending_count = 0;
+                None
+            }
+        }
+    }
+
+    #[cfg(feature = "vi-mode")]
+    fn handle_vi_visual_key(&mut self, key: KeyEvent) -> Option<CompactString> {
+        match key.code {
+            KeyCode::Esc => {
+                self.vi_state.mode = ViMode::Normal;
+                self.vi_state.pending_op = None;
+                self.update_vi_mode_label();
+                None
+            }
+
+            // Motions extend selection
+            KeyCode::Char('h') | KeyCode::Left => {
+                if self.cursor > 0 {
+                    self.cursor = prev_char_boundary(&self.buffer, self.cursor);
+                }
+                None
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, 1, "j", &self.vi_state) {
+                    self.cursor = c;
+                }
+                None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, 1, "k", &self.vi_state) {
+                    self.cursor = c;
+                }
+                None
+            }
+            KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => {
+                if self.cursor < self.buffer.len() {
+                    self.cursor = next_char_boundary(&self.buffer, self.cursor);
+                }
+                None
+            }
+            KeyCode::Char('w') => {
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, 1, "w", &self.vi_state) {
+                    self.cursor = c;
+                }
+                None
+            }
+            KeyCode::Char('b') => {
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, 1, "b", &self.vi_state) {
+                    self.cursor = c;
+                }
+                None
+            }
+            KeyCode::Char('e') => {
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, 1, "e", &self.vi_state) {
+                    self.cursor = c;
+                }
+                None
+            }
+            KeyCode::Char('0') | KeyCode::Home => {
+                self.cursor = 0;
+                None
+            }
+            KeyCode::Char('$') | KeyCode::End => {
+                self.cursor = self.buffer.len();
+                None
+            }
+            KeyCode::Char('^') => {
+                self.cursor = ViState::first_non_whitespace(&self.buffer, self.cursor);
+                None
+            }
+
+            // Visual operators
+            KeyCode::Char('d') => {
+                self.save_vi_undo_point();
+                let (start, end) = self.vi_selection_range();
+                if end > start {
+                    let (new_buf, deleted) = delete_range(&self.buffer, start, end);
+                    self.vi_state.registers.set('"', deleted);
+                    self.buffer = new_buf;
+                    self.cursor = start.min(self.buffer.len());
+                }
+                self.vi_state.mode = ViMode::Normal;
+                self.update_vi_mode_label();
+                None
+            }
+            KeyCode::Char('y') => {
+                let (start, end) = self.vi_selection_range();
+                if end > start {
+                    let yanked = yank_range(&self.buffer, start, end);
+                    self.vi_state.registers.set('"', yanked);
+                }
+                self.vi_state.mode = ViMode::Normal;
+                self.update_vi_mode_label();
+                None
+            }
+            KeyCode::Char('c') => {
+                self.save_vi_undo_point();
+                let (start, end) = self.vi_selection_range();
+                if end > start {
+                    let new_buf = {
+                        let mut s = String::with_capacity(self.buffer.len() - (end - start));
+                        s.push_str(&self.buffer[..start]);
+                        s.push_str(&self.buffer[end..]);
+                        CompactString::new(&s)
+                    };
+                    self.buffer = new_buf;
+                    self.cursor = start;
+                }
+                self.vi_state.mode = ViMode::Insert;
+                self.update_vi_mode_label();
+                None
+            }
+            KeyCode::Char('>') => {
+                self.vi_state.mode = ViMode::Normal;
+                self.update_vi_mode_label();
+                None
+            }
+            KeyCode::Char('<') => {
+                self.vi_state.mode = ViMode::Normal;
+                self.update_vi_mode_label();
+                None
+            }
+            KeyCode::Char('~') => {
+                self.save_vi_undo_point();
+                let (start, end) = self.vi_selection_range();
+                let toggled: String = self.buffer[start..end]
+                    .chars()
+                    .map(|c| {
+                        if c.is_uppercase() {
+                            c.to_lowercase().next().unwrap_or(c)
+                        } else {
+                            c.to_uppercase().next().unwrap_or(c)
+                        }
+                    })
+                    .collect();
+                let mut s = String::with_capacity(self.buffer.len());
+                s.push_str(&self.buffer[..start]);
+                s.push_str(&toggled);
+                s.push_str(&self.buffer[end..]);
+                self.buffer = CompactString::new(&s);
+                self.vi_state.mode = ViMode::Normal;
+                self.update_vi_mode_label();
+                None
+            }
+
+            _ => None,
+        }
+    }
+
+    #[cfg(feature = "vi-mode")]
+    fn vi_selection_range(&self) -> (usize, usize) {
+        let start = self.vi_state.visual_start;
+        let end = self.cursor;
+        if start <= end {
+            (start, end)
+        } else {
+            (end, start)
+        }
+    }
+
+    #[cfg(feature = "vi-mode")]
+    fn handle_vi_cmdline_key(&mut self, key: KeyEvent) -> Option<CompactString> {
+        match key.code {
+            KeyCode::Esc => {
+                self.vi_state.mode = ViMode::Normal;
+                self.vi_state.pending_op = None;
+                self.update_vi_mode_label();
+                None
+            }
+            KeyCode::Enter => {
+                let cmd = self.vi_state.cmdline_buffer.clone();
+                self.vi_state.mode = ViMode::Normal;
+                self.update_vi_mode_label();
+                // Handle basic commands
+                match cmd.trim() {
+                    "q" | "quit" => {
+                        // Signal quit — return a special value?
+                        // For now, no-op in the input handler
+                    }
+                    "w" | "write" => {
+                        // Session save is handled externally
+                    }
+                    "wq" => {
+                        // Save + quit
+                    }
+                    _ => {}
+                }
+                None
+            }
+            KeyCode::Backspace => {
+                if self.vi_state.cmdline_cursor > 0 {
+                    self.vi_state.cmdline_cursor -= 1;
+                    self.vi_state
+                        .cmdline_buffer
+                        .pop(); // Only works for ASCII but OK for commands
+                }
+                None
+            }
+            KeyCode::Char(c) => {
+                self.vi_state.cmdline_buffer.push(c);
+                self.vi_state.cmdline_cursor += 1;
+                None
+            }
+            _ => None,
+        }
+    }
+
+    #[cfg(feature = "vi-mode")]
+    fn handle_vi_search_key(&mut self, key: KeyEvent) -> Option<CompactString> {
+        match key.code {
+            KeyCode::Esc => {
+                self.vi_state.mode = ViMode::Normal;
+                self.vi_state.pending_op = None;
+                self.update_vi_mode_label();
+                None
+            }
+            KeyCode::Enter => {
+                let search = self.vi_state.cmdline_buffer.clone();
+                let forward = matches!(self.vi_state.mode, ViMode::SearchForward);
+                self.vi_state.last_search = Some(search.to_string());
+                self.vi_state.mode = ViMode::Normal;
+                self.update_vi_mode_label();
+                if !search.is_empty() {
+                    if forward {
+                        if let Some(pos) = self.buffer[self.cursor + 1..].find(search.as_str()) {
+                            self.cursor = self.cursor + 1 + pos;
+                        }
+                    } else if let Some(pos) = self.buffer[..self.cursor].rfind(search.as_str()) {
+                        self.cursor = pos;
+                    }
+                }
+                None
+            }
+            KeyCode::Backspace => {
+                if self.vi_state.cmdline_cursor > 0 {
+                    self.vi_state.cmdline_cursor -= 1;
+                    self.vi_state.cmdline_buffer.pop();
+                }
+                None
+            }
+            KeyCode::Char(c) => {
+                self.vi_state.cmdline_buffer.push(c);
+                self.vi_state.cmdline_cursor += 1;
+                None
+            }
+            _ => None,
+        }
+    }
+
+    #[cfg(feature = "vi-mode")]
+    fn apply_vi_motion_or_op(&mut self, motion: &str) {
+        let count = self.vi_state.pending_count.max(1) as usize;
+        self.vi_state.pending_count = 0;
+
+        if let Some(op) = self.vi_state.pending_op.take() {
+            let register = self.vi_state.pending_register.take();
+            if let Some((new_buf, new_cursor, deleted)) =
+                apply_operator(&self.buffer, self.cursor, op, motion, count as u32, &mut self.vi_state)
+            {
+                if !deleted.is_empty() {
+                    self.vi_state.registers.set('"', deleted.clone());
+                    if let Some(r) = register {
+                        self.vi_state.registers.set(r, deleted);
+                    }
+                }
+                self.buffer = new_buf;
+                self.cursor = new_cursor;
+            }
+        } else if let Some(new_cursor) =
+            apply_motion(&self.buffer, self.cursor, count, motion, &self.vi_state)
+        {
+            self.cursor = new_cursor;
+        }
+        self.vi_state.pending_register = None;
+    }
+
+    #[cfg(feature = "vi-mode")]
+    fn apply_vi_operator(&mut self, motion: &str) {
+        let op = match self.vi_state.pending_op {
+            Some(o) => o,
+            None => return,
+        };
+        self.vi_state.pending_op = None;
+
+        let register = self.vi_state.pending_register.take();
+        if let Some((new_buf, new_cursor, deleted)) =
+            apply_operator(&self.buffer, self.cursor, op, motion, 1, &mut self.vi_state)
+        {
+            if !deleted.is_empty() {
+                self.vi_state.registers.set('"', deleted.clone());
+                if let Some(r) = register {
+                    self.vi_state.registers.set(r, deleted);
+                }
+            }
+            self.buffer = new_buf;
+            self.cursor = new_cursor;
+        }
     }
 }

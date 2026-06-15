@@ -60,6 +60,34 @@ impl std::fmt::Display for EditSystem {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InputMode {
+    #[default]
+    Emacs,
+    Vi,
+}
+
+impl std::fmt::Display for InputMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InputMode::Emacs => write!(f, "emacs"),
+            InputMode::Vi => write!(f, "vi"),
+        }
+    }
+}
+
+impl std::str::FromStr for InputMode {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "emacs" => Ok(InputMode::Emacs),
+            "vi" => Ok(InputMode::Vi),
+            _ => Err(format!("unknown input mode '{}' (valid: emacs, vi)", s)),
+        }
+    }
+}
+
 impl std::str::FromStr for EditSystem {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
