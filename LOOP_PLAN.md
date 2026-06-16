@@ -34,7 +34,7 @@
 - [x] `unwrap_or("").to_string()` → `unwrap_or_default()` in vi-related register access
 - [x] Replace dead backward-search branch with forward open-bracket search in `resolve_text_object::Brackets`
 - [x] Verify `apply_motion("j"/"k")` — safe on empty buffer
-- [ ] **WONTFIX**: `#![allow(dead_code)]` in vi.rs and `#[allow(dead_code)]` on `VisualType::Block` — `TextObject`, `resolve_text_object`, and `ViOperator::IndentRight/Left` are genuinely dead code; the annotation is correct.
+- [x] **WONTFIX**: `#![allow(dead_code)]` in vi.rs and `#[allow(dead_code)]` on `VisualType::Block` — `TextObject`, `resolve_text_object`, and `ViOperator::IndentRight/Left` are genuinely dead code; the annotation is correct.
 
 ## Build & Test
 - [x] `cargo fmt` passes
