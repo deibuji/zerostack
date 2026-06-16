@@ -1054,6 +1054,12 @@ impl InputEditor {
                 self.save_vi_undo_point();
                 self.vi_state.pending_op = Some(ViOperator::Delete);
                 self.apply_vi_motion_or_op("$");
+                self.vi_state.push_undo(
+                    &self.vi_state.insert_start_buf,
+                    &self.buffer,
+                    self.vi_state.insert_start_cursor,
+                    self.cursor,
+                );
                 None
             }
 
@@ -1064,6 +1070,12 @@ impl InputEditor {
                     self.vi_state.pending_op = None;
                     self.save_vi_undo_point();
                     self.apply_vi_operator("_");
+                    self.vi_state.push_undo(
+                        &self.vi_state.insert_start_buf,
+                        &self.buffer,
+                        self.vi_state.insert_start_cursor,
+                        self.cursor,
+                    );
                 } else {
                     self.vi_state.pending_op = Some(ViOperator::Delete);
                 }
@@ -1096,6 +1108,12 @@ impl InputEditor {
                     self.vi_state.pending_op = None;
                     self.save_vi_undo_point();
                     self.apply_vi_operator("_");
+                    self.vi_state.push_undo(
+                        &self.vi_state.insert_start_buf,
+                        &self.buffer,
+                        self.vi_state.insert_start_cursor,
+                        self.cursor,
+                    );
                 } else {
                     self.vi_state.pending_op = Some(ViOperator::IndentRight);
                 }
@@ -1106,6 +1124,12 @@ impl InputEditor {
                     self.vi_state.pending_op = None;
                     self.save_vi_undo_point();
                     self.apply_vi_operator("_");
+                    self.vi_state.push_undo(
+                        &self.vi_state.insert_start_buf,
+                        &self.buffer,
+                        self.vi_state.insert_start_cursor,
+                        self.cursor,
+                    );
                 } else {
                     self.vi_state.pending_op = Some(ViOperator::IndentLeft);
                 }
@@ -1113,15 +1137,36 @@ impl InputEditor {
             }
 
             // ---- Other commands ----
+            KeyCode::Char('x') => {
+                self.save_vi_undo_point();
+                if self.cursor < self.buffer.len() {
+                    let saved_cursor = self.cursor;
+                    let end = next_char_boundary(&self.buffer, self.cursor);
+                    let mut s = String::with_capacity(self.buffer.len() - (end - self.cursor));
+                    s.push_str(&self.buffer[..self.cursor]);
+                    s.push_str(&self.buffer[end..]);
+                    self.buffer = CompactString::new(&s);
+                    self.vi_state.push_undo(
+                        &self.vi_state.insert_start_buf,
+                        &self.buffer,
+                        self.vi_state.insert_start_cursor,
+                        saved_cursor,
+                    );
+                }
+                None
+            }
             KeyCode::Char('X') => {
                 self.save_vi_undo_point();
                 if self.cursor > 0 {
                     let saved = self.cursor;
-                    let old_buf = self.vi_state.insert_start_buf.clone();
                     self.cursor = prev_char_boundary(&self.buffer, self.cursor);
                     self.buffer.remove(self.cursor);
-                    self.vi_state
-                        .push_undo(&old_buf, &self.buffer, saved, self.cursor);
+                    self.vi_state.push_undo(
+                        &self.vi_state.insert_start_buf,
+                        &self.buffer,
+                        saved,
+                        self.cursor,
+                    );
                 }
                 None
             }
@@ -1138,6 +1183,12 @@ impl InputEditor {
                     self.buffer.insert_str(insert_pos, &text);
                     self.cursor = insert_pos + text.len();
                 }
+                self.vi_state.push_undo(
+                    &self.vi_state.insert_start_buf,
+                    &self.buffer,
+                    self.vi_state.insert_start_cursor,
+                    self.cursor,
+                );
                 None
             }
             KeyCode::Char('P') => {
@@ -1152,6 +1203,12 @@ impl InputEditor {
                     self.buffer.insert_str(self.cursor, &text);
                     self.cursor += text.len();
                 }
+                self.vi_state.push_undo(
+                    &self.vi_state.insert_start_buf,
+                    &self.buffer,
+                    self.vi_state.insert_start_cursor,
+                    self.cursor,
+                );
                 None
             }
             KeyCode::Char('u') => {
@@ -1202,6 +1259,12 @@ impl InputEditor {
                         self.cursor = abs_pos;
                     }
                 }
+                self.vi_state.push_undo(
+                    &self.vi_state.insert_start_buf,
+                    &self.buffer,
+                    self.vi_state.insert_start_cursor,
+                    self.cursor,
+                );
                 None
             }
             KeyCode::Char('~') => {
@@ -1218,18 +1281,23 @@ impl InputEditor {
                     self.buffer = CompactString::new(format!("{}{}{}", before, toggled, after));
                     self.cursor = next_char_boundary(&self.buffer, self.cursor);
                 }
+                self.vi_state.push_undo(
+                    &self.vi_state.insert_start_buf,
+                    &self.buffer,
+                    self.vi_state.insert_start_cursor,
+                    self.cursor,
+                );
                 None
             }
             KeyCode::Char('.') => {
                 if let Some(ref repeat) = self.vi_state.repeat.clone() {
+                    self.save_vi_undo_point();
                     match &repeat.op {
                         RepeatOp::Change(..) => {
-                            self.save_vi_undo_point();
                             self.buffer = repeat.text.clone();
                             self.cursor = repeat.cursor;
                         }
                         RepeatOp::Delete(saved_cursor, saved_len) => {
-                            self.save_vi_undo_point();
                             let end = *saved_cursor + saved_len;
                             if end <= self.buffer.len() {
                                 let mut s = String::with_capacity(self.buffer.len() - saved_len);
@@ -1248,6 +1316,12 @@ impl InputEditor {
                             }
                         }
                     }
+                    self.vi_state.push_undo(
+                        &self.vi_state.insert_start_buf,
+                        &self.buffer,
+                        self.vi_state.insert_start_cursor,
+                        self.cursor,
+                    );
                 }
                 None
             }
@@ -1439,6 +1513,12 @@ impl InputEditor {
                     self.buffer = new_buf;
                     self.cursor = start.min(self.buffer.len());
                 }
+                self.vi_state.push_undo(
+                    &self.vi_state.insert_start_buf,
+                    &self.buffer,
+                    self.vi_state.insert_start_cursor,
+                    self.cursor,
+                );
                 self.vi_state.mode = ViMode::Normal;
                 self.update_vi_mode_label();
                 None
@@ -1498,6 +1578,12 @@ impl InputEditor {
                 s.push_str(&toggled);
                 s.push_str(&self.buffer[end..]);
                 self.buffer = CompactString::new(&s);
+                self.vi_state.push_undo(
+                    &self.vi_state.insert_start_buf,
+                    &self.buffer,
+                    self.vi_state.insert_start_cursor,
+                    self.cursor,
+                );
                 self.vi_state.mode = ViMode::Normal;
                 self.update_vi_mode_label();
                 None

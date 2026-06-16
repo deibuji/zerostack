@@ -21,7 +21,7 @@
 ### 🔴 Blocking
 - [x] **Paste (`p`) placement off by one** — `cursor += 1` -> `next_char_boundary()`. Also fixed same bug in repeat `.` paste handler.
 - [x] **`%` at position 0 panics** — `cursor.wrapping_sub(1)` wraps to `usize::MAX` when cursor is 0, causing OOB in `match_bracket`. Add early-return guard.
-- [ ] **Normal-mode + visual-mode ops not undoable** — Only `X` calls `push_undo`. Every other buffer-mutating normal/visual op (dd, x, D, J, ~, visual d/c/~/u/U) mutates buffer without pushing undo entry. Need `push_undo()` calls in 8+ locations.
+- [x] **Normal-mode + visual-mode ops not undoable** — Added `push_undo()` after all buffer-mutating normal/visual ops: `x`, `D`, `dd`, `>>`, `<<`, `p`, `P`, `J`, `~`, `.`, visual `d`, visual `~`. Also implemented previously-missing `x` (delete char under cursor). Simplified `X` to use same `insert_start_buf` pattern as everything else.
 - [ ] **Visual selection not highlighted** — `visual_start` and `cursor` tracked but never passed to renderer. User can't see what's selected. Need `selected_range` plumbing through `draw_bottom`.
 
 ### 🟡 Should Fix
