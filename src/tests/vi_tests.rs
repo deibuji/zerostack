@@ -1,6 +1,6 @@
 use crate::ui::input::vi::{
-    apply_motion, apply_operator, delete_range, motion_to_range, yank_range, Direction, TextObject,
-    UndoEntry, ViMode, ViOperator,
+    Direction, TextObject, UndoEntry, ViMode, ViOperator, apply_motion, apply_operator,
+    delete_range, motion_to_range, yank_range,
 };
 use compact_str::CompactString;
 
@@ -32,18 +32,14 @@ fn mode_label_normal() {
 #[test]
 fn mode_label_visual_char() {
     let mut vi = make_vi();
-    vi.mode = crate::ui::input::vi::ViMode::Visual(
-        crate::ui::input::vi::VisualType::Char,
-    );
+    vi.mode = crate::ui::input::vi::ViMode::Visual(crate::ui::input::vi::VisualType::Char);
     assert_eq!(vi.mode_label(), "VISUAL");
 }
 
 #[test]
 fn mode_label_visual_line() {
     let mut vi = make_vi();
-    vi.mode = crate::ui::input::vi::ViMode::Visual(
-        crate::ui::input::vi::VisualType::Line,
-    );
+    vi.mode = crate::ui::input::vi::ViMode::Visual(crate::ui::input::vi::VisualType::Line);
     assert_eq!(vi.mode_label(), "VISUAL LINE");
 }
 
@@ -208,51 +204,33 @@ fn match_bracket_nested() {
 #[test]
 fn match_bracket_no_match() {
     let buf = "abc";
-    assert_eq!(
-        crate::ui::input::vi::ViState::match_bracket(buf, 0),
-        None
-    );
-    assert_eq!(
-        crate::ui::input::vi::ViState::match_bracket(buf, 1),
-        None
-    );
+    assert_eq!(crate::ui::input::vi::ViState::match_bracket(buf, 0), None);
+    assert_eq!(crate::ui::input::vi::ViState::match_bracket(buf, 1), None);
 }
 
 #[test]
 fn match_bracket_unmatched_open() {
     let buf = "(abc";
-    assert_eq!(
-        crate::ui::input::vi::ViState::match_bracket(buf, 0),
-        None
-    );
+    assert_eq!(crate::ui::input::vi::ViState::match_bracket(buf, 0), None);
 }
 
 #[test]
 fn match_bracket_unmatched_close() {
     let buf = "abc)";
-    assert_eq!(
-        crate::ui::input::vi::ViState::match_bracket(buf, 3),
-        None
-    );
+    assert_eq!(crate::ui::input::vi::ViState::match_bracket(buf, 3), None);
 }
 
 #[test]
 fn match_bracket_cursor_at_zero_backward() {
     // Cursor at 0 with ')' — no characters before 0, cannot match backward
     let buf = ")";
-    assert_eq!(
-        crate::ui::input::vi::ViState::match_bracket(buf, 0),
-        None
-    );
+    assert_eq!(crate::ui::input::vi::ViState::match_bracket(buf, 0), None);
 }
 
 #[test]
 fn match_bracket_non_bracket_char() {
     let buf = "hello";
-    assert_eq!(
-        crate::ui::input::vi::ViState::match_bracket(buf, 2),
-        None
-    );
+    assert_eq!(crate::ui::input::vi::ViState::match_bracket(buf, 2), None);
 }
 
 #[test]
@@ -413,10 +391,7 @@ fn next_word_start_with_underscore() {
 #[test]
 fn next_paragraph_basic() {
     let buf = "line1\n\nline2";
-    assert_eq!(
-        crate::ui::input::vi::ViState::next_paragraph(buf, 0),
-        7
-    );
+    assert_eq!(crate::ui::input::vi::ViState::next_paragraph(buf, 0), 7);
 }
 
 #[test]
@@ -432,53 +407,35 @@ fn next_paragraph_no_boundary() {
 fn next_paragraph_already_at_end() {
     let buf = "hi";
     let end = buf.len();
-    assert_eq!(
-        crate::ui::input::vi::ViState::next_paragraph(buf, end),
-        end
-    );
+    assert_eq!(crate::ui::input::vi::ViState::next_paragraph(buf, end), end);
 }
 
 #[test]
 fn prev_paragraph_basic() {
     let buf = "line1\n\nline2";
-    assert_eq!(
-        crate::ui::input::vi::ViState::prev_paragraph(buf, 10),
-        5
-    );
+    assert_eq!(crate::ui::input::vi::ViState::prev_paragraph(buf, 10), 5);
 }
 
 #[test]
 fn prev_paragraph_at_start() {
     let buf = "hello";
-    assert_eq!(
-        crate::ui::input::vi::ViState::prev_paragraph(buf, 0),
-        0
-    );
+    assert_eq!(crate::ui::input::vi::ViState::prev_paragraph(buf, 0), 0);
 }
 
 #[test]
 fn prev_paragraph_no_boundary() {
     let buf = "hello world";
-    assert_eq!(
-        crate::ui::input::vi::ViState::prev_paragraph(buf, 5),
-        0
-    );
+    assert_eq!(crate::ui::input::vi::ViState::prev_paragraph(buf, 5), 0);
 }
 
 #[test]
 fn prev_paragraph_empty() {
-    assert_eq!(
-        crate::ui::input::vi::ViState::prev_paragraph("", 0),
-        0
-    );
+    assert_eq!(crate::ui::input::vi::ViState::prev_paragraph("", 0), 0);
 }
 
 #[test]
 fn next_paragraph_empty() {
-    assert_eq!(
-        crate::ui::input::vi::ViState::next_paragraph("", 0),
-        0
-    );
+    assert_eq!(crate::ui::input::vi::ViState::next_paragraph("", 0), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -537,8 +494,7 @@ fn first_non_whitespace_empty() {
 #[test]
 fn resolve_iw_in_word() {
     let buf = "some text";
-    let (s, e) =
-        crate::ui::input::vi::ViState::resolve_text_object(buf, 1, TextObject::Word, true);
+    let (s, e) = crate::ui::input::vi::ViState::resolve_text_object(buf, 1, TextObject::Word, true);
     assert_eq!(&buf[s..e], "some");
 }
 
@@ -553,8 +509,7 @@ fn resolve_aw_in_word() {
 #[test]
 fn resolve_iW() {
     let buf = "foo-bar baz";
-    let (s, e) =
-        crate::ui::input::vi::ViState::resolve_text_object(buf, 1, TextObject::WORD, true);
+    let (s, e) = crate::ui::input::vi::ViState::resolve_text_object(buf, 1, TextObject::WORD, true);
     assert_eq!(&buf[s..e], "foo-bar");
 }
 
@@ -595,18 +550,16 @@ fn resolve_sentence() {
 #[test]
 fn resolve_quotes_inner() {
     let buf = r#"say "hello" world"#;
-    let (s, e) = crate::ui::input::vi::ViState::resolve_text_object(
-        buf, 6, TextObject::Quotes('"'), true,
-    );
+    let (s, e) =
+        crate::ui::input::vi::ViState::resolve_text_object(buf, 6, TextObject::Quotes('"'), true);
     assert_eq!(&buf[s..e], "hello");
 }
 
 #[test]
 fn resolve_quotes_outer() {
     let buf = r#"say "hello" world"#;
-    let (s, e) = crate::ui::input::vi::ViState::resolve_text_object(
-        buf, 6, TextObject::Quotes('"'), false,
-    );
+    let (s, e) =
+        crate::ui::input::vi::ViState::resolve_text_object(buf, 6, TextObject::Quotes('"'), false);
     assert_eq!(&buf[s..e], "\"hello\"");
 }
 
@@ -614,7 +567,8 @@ fn resolve_quotes_outer() {
 fn resolve_brackets_inner() {
     let buf = "func(a, b)";
     let (s, e) = crate::ui::input::vi::ViState::resolve_text_object(
-        buf, 6,
+        buf,
+        6,
         TextObject::Brackets('(', ')'),
         true,
     );
@@ -625,7 +579,8 @@ fn resolve_brackets_inner() {
 fn resolve_brackets_outer() {
     let buf = "func(a, b)";
     let (s, e) = crate::ui::input::vi::ViState::resolve_text_object(
-        buf, 6,
+        buf,
+        6,
         TextObject::Brackets('(', ')'),
         false,
     );
@@ -637,7 +592,8 @@ fn resolve_brackets_cursor_after_open() {
     let buf = "if (x > 0)";
     // Cursor is on the opening paren itself — should still find the pair
     let (s, e) = crate::ui::input::vi::ViState::resolve_text_object(
-        buf, 3,
+        buf,
+        3,
         TextObject::Brackets('(', ')'),
         true,
     );
@@ -649,7 +605,8 @@ fn resolve_brackets_cursor_before_close_nested() {
     let buf = "a(b(c)d)";
     // cursor inside inner parens
     let (s, e) = crate::ui::input::vi::ViState::resolve_text_object(
-        buf, 4,
+        buf,
+        4,
         TextObject::Brackets('(', ')'),
         true,
     );
@@ -661,7 +618,8 @@ fn resolve_brackets_cursor_before_open() {
     let buf = "a(b)";
     // cursor before opening bracket should search forward
     let (s, e) = crate::ui::input::vi::ViState::resolve_text_object(
-        buf, 0,
+        buf,
+        0,
         TextObject::Brackets('(', ')'),
         true,
     );
@@ -671,24 +629,21 @@ fn resolve_brackets_cursor_before_open() {
 #[test]
 fn resolve_tag_inner() {
     let buf = "<div>hello</div>";
-    let (s, e) =
-        crate::ui::input::vi::ViState::resolve_text_object(buf, 7, TextObject::Tag, true);
+    let (s, e) = crate::ui::input::vi::ViState::resolve_text_object(buf, 7, TextObject::Tag, true);
     assert_eq!(&buf[s..e], "hello");
 }
 
 #[test]
 fn resolve_tag_outer() {
     let buf = "<div>hello</div>";
-    let (s, e) =
-        crate::ui::input::vi::ViState::resolve_text_object(buf, 7, TextObject::Tag, false);
+    let (s, e) = crate::ui::input::vi::ViState::resolve_text_object(buf, 7, TextObject::Tag, false);
     assert_eq!(&buf[s..e], "<div>hello</div>");
 }
 
 #[test]
 fn resolve_tag_no_match() {
     let buf = "hello";
-    let (s, e) =
-        crate::ui::input::vi::ViState::resolve_text_object(buf, 3, TextObject::Tag, true);
+    let (s, e) = crate::ui::input::vi::ViState::resolve_text_object(buf, 3, TextObject::Tag, true);
     assert_eq!(&buf[s..e], "");
     assert_eq!(s, 3);
     assert_eq!(e, 3);
