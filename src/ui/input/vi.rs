@@ -249,9 +249,9 @@ impl ViState {
             }
             let mut i = cursor.wrapping_sub(1);
             loop {
-                if chars[i] == close {
+                if chars[i] == open {
                     depth += 1;
-                } else if chars[i] == open {
+                } else if chars[i] == close {
                     depth -= 1;
                     if depth == 0 {
                         return Some(i);
@@ -410,7 +410,26 @@ impl ViState {
             TextObject::Paragraph => {
                 let start = Self::prev_paragraph(buf, cursor);
                 let end = Self::next_paragraph(buf, cursor);
-                (start, end)
+                if inner {
+                    // Skip leading blank lines
+                    let mut inner_start = start;
+                    while inner_start < end && chars[inner_start] == '\n' {
+                        inner_start += 1;
+                    }
+                    // Skip trailing blank lines
+                    let mut inner_end = end;
+                    while inner_end > inner_start && chars[inner_end - 1] == '\n' {
+                        inner_end -= 1;
+                    }
+                    (inner_start, inner_end)
+                } else {
+                    // Skip leading blank lines only
+                    let mut content_start = start;
+                    while content_start < end && chars[content_start] == '\n' {
+                        content_start += 1;
+                    }
+                    (content_start, end)
+                }
             }
             TextObject::Sentence => {
                 // Simple sentence: delimited by .!? followed by whitespace or end
@@ -421,6 +440,10 @@ impl ViState {
                         break;
                     }
                     start -= 1;
+                }
+                // Skip leading whitespace
+                while start < len && chars[start].is_whitespace() {
+                    start += 1;
                 }
                 let mut end = cursor;
                 while end < len {
@@ -477,30 +500,16 @@ impl ViState {
                         depth -= 1;
                     }
                 }
-                // If we didn't find an opening bracket before cursor, search after
+                // If we didn't find an opening bracket before cursor, search forward
                 if !found_start {
-                    let mut search_end = cursor;
-                    while search_end < len {
-                        if chars[search_end] == close {
-                            break;
-                        }
-                        search_end += 1;
-                    }
-                    // Forward search for matching pair
-                    start = cursor;
-                    let mut forward_start = cursor;
-                    depth = 0;
-                    while forward_start > 0 {
-                        forward_start -= 1;
-                        if chars[forward_start] == close {
-                            depth += 1;
-                        } else if chars[forward_start] == open && depth == 0 {
-                            start = forward_start;
+                    let mut forward = cursor;
+                    while forward < len {
+                        if chars[forward] == open {
+                            start = forward;
                             found_start = true;
                             break;
-                        } else if chars[forward_start] == open {
-                            depth -= 1;
                         }
+                        forward += 1;
                     }
                 }
                 if !found_start {
@@ -528,14 +537,18 @@ impl ViState {
             TextObject::Tag => {
                 // Simple HTML/XML tag inner/outer
                 let text = &buf[..len];
-                // Find previous <
+                // Find previous <, skipping > and closing tags
                 let mut start = cursor;
                 while start > 0 {
                     start -= 1;
                     if chars[start] == '>' {
-                        break;
+                        continue;
                     }
                     if chars[start] == '<' {
+                        // Skip closing tags (</...>)
+                        if start + 1 < len && chars[start + 1] == '/' {
+                            continue;
+                        }
                         // Found opening tag
                         let tag_end = text[start..]
                             .find('>')
@@ -631,7 +644,7 @@ pub fn apply_motion(
             for _ in 0..cnt {
                 c = ViState::next_word_end(buf, c, false);
             }
-            Some(c)
+            Some(c.saturating_sub(1).max(cursor))
         }
         "W" => {
             let mut c = cursor;
@@ -652,7 +665,7 @@ pub fn apply_motion(
             for _ in 0..cnt {
                 c = ViState::next_word_end(buf, c, true);
             }
-            Some(c)
+            Some(c.saturating_sub(1).max(cursor))
         }
         "0" | "home" => Some(0),
         "$" | "end" => Some(len),
@@ -834,8 +847,12 @@ pub fn apply_operator(
                 ViOperator::Change => {
                     let (new_buf, _deleted) = delete_range(buf, start, end);
                     // Insert a blank line for cc
+                    let mut ins = String::with_capacity(new_buf.len() + 1);
+                    ins.push_str(&new_buf[..start]);
+                    ins.push('\n');
+                    ins.push_str(&new_buf[start..]);
                     let saved = buf[start..end].into();
-                    Some((new_buf, start, saved))
+                    Some((CompactString::new(&ins), start, saved))
                 }
                 _ => None,
             }
@@ -886,7 +903,8 @@ pub fn apply_operator(
             _ => None,
         }
     } else if let Some(target) = apply_motion(buf, cursor, count as usize, motion, vi) {
-        let (start, end) = motion_to_range(buf, cursor, target, true);
+        let inclusive = motion == "e" || motion == "E";
+        let (start, end) = motion_to_range(buf, cursor, target, !inclusive);
         match op {
             ViOperator::Delete => {
                 let (new_buf, deleted) = delete_range(buf, start, end);

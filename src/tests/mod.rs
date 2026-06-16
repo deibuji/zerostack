@@ -56,5 +56,7 @@ mod subagents_tests;
 mod todo_tests;
 #[cfg(test)]
 mod tools_mod_tests;
+#[cfg(all(test, feature = "vi-mode"))]
+mod vi_tests;
 #[cfg(all(test, feature = "git-worktree"))]
 mod worktree_tests;

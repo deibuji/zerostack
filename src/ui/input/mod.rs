@@ -19,7 +19,7 @@ use crate::ui::pickers::models::ModelsPicker;
 const MAX_KILL_RING: usize = 30;
 
 #[cfg(feature = "vi-mode")]
-mod vi;
+pub(crate) mod vi;
 #[cfg(feature = "vi-mode")]
 use vi::*;
 
@@ -1159,11 +1159,13 @@ impl InputEditor {
             }
             KeyCode::Char('p') => {
                 self.save_vi_undo_point();
+                let register = self.vi_state.pending_register.unwrap_or('"');
                 let text = self
                     .vi_state
-                    .pending_register
-                    .and_then(|r| self.vi_state.registers.get(r).map(|s| s.to_string()))
-                    .unwrap_or_else(|| self.vi_state.registers.get('"').unwrap_or("").to_string());
+                    .registers
+                    .get(register)
+                    .unwrap_or_default()
+                    .to_string();
                 self.vi_state.pending_register = None;
                 if !text.is_empty() {
                     let insert_pos = next_char_boundary(&self.buffer, self.cursor);
@@ -1175,11 +1177,13 @@ impl InputEditor {
             }
             KeyCode::Char('P') => {
                 self.save_vi_undo_point();
+                let register = self.vi_state.pending_register.unwrap_or('"');
                 let text = self
                     .vi_state
-                    .pending_register
-                    .and_then(|r| self.vi_state.registers.get(r).map(|s| s.to_string()))
-                    .unwrap_or_else(|| self.vi_state.registers.get('"').unwrap_or("").to_string());
+                    .registers
+                    .get(register)
+                    .unwrap_or_default()
+                    .to_string();
                 self.vi_state.pending_register = None;
                 if !text.is_empty() {
                     self.buffer.insert_str(self.cursor, &text);
@@ -1275,7 +1279,12 @@ impl InputEditor {
                             }
                         }
                         RepeatOp::Paste => {
-                            let text = self.vi_state.registers.get('"').unwrap_or("").to_string();
+                            let text = self
+                                .vi_state
+                                .registers
+                                .get('"')
+                                .unwrap_or_default()
+                                .to_string();
                             if !text.is_empty() {
                                 let insert_pos = next_char_boundary(&self.buffer, self.cursor);
                                 self.buffer.insert_str(insert_pos, &text);
