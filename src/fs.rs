@@ -90,10 +90,7 @@ pub async fn atomic_write(
 fn unique_tmp_path(target: &Path, dir: &Path) -> PathBuf {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let stem = target
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("tmp");
+    let stem = target.file_name().and_then(|s| s.to_str()).unwrap_or("tmp");
     dir.join(format!(".{stem}.zswrite.{}.{n}.tmp", std::process::id()))
 }
 

@@ -802,10 +802,10 @@ impl InputEditor {
     #[cfg(feature = "vi-mode")]
     fn handle_vi_insert_key(&mut self, key: KeyEvent) -> Option<CompactString> {
         if key.code == KeyCode::Esc
-            || (key.code == KeyCode::Char('[')
-                && key.modifiers.contains(KeyModifiers::CONTROL))
+            || (key.code == KeyCode::Char('[') && key.modifiers.contains(KeyModifiers::CONTROL))
         {
-            let old_buf = std::mem::replace(&mut self.vi_state.insert_start_buf, self.buffer.clone());
+            let old_buf =
+                std::mem::replace(&mut self.vi_state.insert_start_buf, self.buffer.clone());
             let old_cursor = self.vi_state.insert_start_cursor;
             self.vi_state
                 .push_undo(&old_buf, &self.buffer, old_cursor, self.cursor);
@@ -849,7 +849,13 @@ impl InputEditor {
 
         // Handle register prefix: "x waits for register char
         if self.vi_state.pending_register.is_some()
-            && matches!(key.code, KeyCode::Char('a'..='z') | KeyCode::Char('0'..='9') | KeyCode::Char('"') | KeyCode::Char('+'))
+            && matches!(
+                key.code,
+                KeyCode::Char('a'..='z')
+                    | KeyCode::Char('0'..='9')
+                    | KeyCode::Char('"')
+                    | KeyCode::Char('+')
+            )
         {
             if let KeyCode::Char(c) = key.code {
                 self.vi_state.pending_register = Some(c);
@@ -1128,9 +1134,9 @@ impl InputEditor {
                     .unwrap_or_else(|| self.vi_state.registers.get('"').unwrap_or("").to_string());
                 self.vi_state.pending_register = None;
                 if !text.is_empty() {
-                    self.cursor += 1;
-                    self.buffer.insert_str(self.cursor, &text);
-                    self.cursor += text.len();
+                    let insert_pos = next_char_boundary(&self.buffer, self.cursor);
+                    self.buffer.insert_str(insert_pos, &text);
+                    self.cursor = insert_pos + text.len();
                 }
                 None
             }
@@ -1234,16 +1240,11 @@ impl InputEditor {
                             }
                         }
                         RepeatOp::Paste => {
-                            let text = self
-                                .vi_state
-                                .registers
-                                .get('"')
-                                .unwrap_or("")
-                                .to_string();
+                            let text = self.vi_state.registers.get('"').unwrap_or("").to_string();
                             if !text.is_empty() {
-                                self.cursor += 1;
-                                self.buffer.insert_str(self.cursor, &text);
-                                self.cursor += text.len();
+                                let insert_pos = next_char_boundary(&self.buffer, self.cursor);
+                                self.buffer.insert_str(insert_pos, &text);
+                                self.cursor = insert_pos + text.len();
                             }
                         }
                     }
@@ -1549,9 +1550,7 @@ impl InputEditor {
             KeyCode::Backspace => {
                 if self.vi_state.cmdline_cursor > 0 {
                     self.vi_state.cmdline_cursor -= 1;
-                    self.vi_state
-                        .cmdline_buffer
-                        .pop(); // Only works for ASCII but OK for commands
+                    self.vi_state.cmdline_buffer.pop(); // Only works for ASCII but OK for commands
                 }
                 None
             }
@@ -1613,9 +1612,14 @@ impl InputEditor {
 
         if let Some(op) = self.vi_state.pending_op.take() {
             let register = self.vi_state.pending_register.take();
-            if let Some((new_buf, new_cursor, deleted)) =
-                apply_operator(&self.buffer, self.cursor, op, motion, count as u32, &mut self.vi_state)
-            {
+            if let Some((new_buf, new_cursor, deleted)) = apply_operator(
+                &self.buffer,
+                self.cursor,
+                op,
+                motion,
+                count as u32,
+                &mut self.vi_state,
+            ) {
                 if !deleted.is_empty() {
                     self.vi_state.registers.set('"', deleted.clone());
                     if let Some(r) = register {

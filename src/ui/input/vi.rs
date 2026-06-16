@@ -3,8 +3,8 @@
 use compact_str::CompactString;
 
 use crate::ui::input::cursor::{
-    cursor_to_line_col, count_lines, line_col_to_cursor, line_end, line_start,
-    next_char_boundary, prev_char_boundary,
+    count_lines, cursor_to_line_col, line_col_to_cursor, line_end, line_start, next_char_boundary,
+    prev_char_boundary,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -240,6 +240,9 @@ impl ViState {
                 i += 1;
             }
         } else {
+            if cursor == 0 {
+                return None;
+            }
             let mut i = cursor.wrapping_sub(1);
             loop {
                 if chars[i] == close {
@@ -268,7 +271,10 @@ impl ViState {
         }
         let mut i = cursor;
         // Skip current word
-        while i < len && !chars[i].is_whitespace() && (big || chars[i].is_alphanumeric() || chars[i] == '_') {
+        while i < len
+            && !chars[i].is_whitespace()
+            && (big || chars[i].is_alphanumeric() || chars[i] == '_')
+        {
             i += 1;
         }
         // Skip whitespace
@@ -290,7 +296,10 @@ impl ViState {
             i -= 1;
         }
         // Skip current word backwards
-        while i > 0 && !chars[i].is_whitespace() && (big || chars[i].is_alphanumeric() || chars[i] == '_') {
+        while i > 0
+            && !chars[i].is_whitespace()
+            && (big || chars[i].is_alphanumeric() || chars[i] == '_')
+        {
             i -= 1;
         }
         if chars[i].is_whitespace() || (!big && !chars[i].is_alphanumeric() && chars[i] != '_') {
@@ -308,10 +317,16 @@ impl ViState {
         }
         let mut i = cursor;
         // Skip current word
-        while i < len && !chars[i].is_whitespace() && (big || chars[i].is_alphanumeric() || chars[i] == '_') {
+        while i < len
+            && !chars[i].is_whitespace()
+            && (big || chars[i].is_alphanumeric() || chars[i] == '_')
+        {
             i += 1;
         }
-        if i < len && !chars[i].is_whitespace() && (big || !chars[i].is_alphanumeric() && chars[i] != '_') {
+        if i < len
+            && !chars[i].is_whitespace()
+            && (big || !chars[i].is_alphanumeric() && chars[i] != '_')
+        {
             i += 1;
         }
         i
@@ -357,7 +372,12 @@ impl ViState {
     }
 
     /// Resolve a text object range
-    pub fn resolve_text_object(buf: &str, cursor: usize, obj: TextObject, inner: bool) -> (usize, usize) {
+    pub fn resolve_text_object(
+        buf: &str,
+        cursor: usize,
+        obj: TextObject,
+        inner: bool,
+    ) -> (usize, usize) {
         let chars: Vec<char> = buf.chars().collect();
         let len = chars.len();
         match obj {
@@ -513,9 +533,15 @@ impl ViState {
                     }
                     if chars[start] == '<' {
                         // Found opening tag
-                        let tag_end = text[start..].find('>').map(|p| start + p + 1).unwrap_or(len);
+                        let tag_end = text[start..]
+                            .find('>')
+                            .map(|p| start + p + 1)
+                            .unwrap_or(len);
                         // Find closing tag
-                        let tag_name = &text[start + 1..tag_end - 1].split_whitespace().next().unwrap_or("");
+                        let tag_name = &text[start + 1..tag_end - 1]
+                            .split_whitespace()
+                            .next()
+                            .unwrap_or("");
                         let close_tag = format!("</{}>", tag_name);
                         if let Some(close_pos) = text[tag_end..].find(&close_tag) {
                             let close_end = tag_end + close_pos + close_tag.len();
@@ -727,7 +753,12 @@ pub fn apply_motion(
 }
 
 /// Get a range from cursor to motion target for an operator
-pub fn motion_to_range(_buf: &str, cursor: usize, target: usize, exclusive: bool) -> (usize, usize) {
+pub fn motion_to_range(
+    _buf: &str,
+    cursor: usize,
+    target: usize,
+    exclusive: bool,
+) -> (usize, usize) {
     if target > cursor {
         (cursor, if exclusive { target } else { target + 1 })
     } else {

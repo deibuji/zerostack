@@ -1,0 +1,42 @@
+# LOOP PLAN — vi-mode fixup
+
+## Done
+- [x] Config/CLI plumbing: `InputMode` enum, `--input-mode`, config field, default emacs
+- [x] Mode indicator in status bar (`-- NORMAL --`, `-- INSERT --`, `-- VISUAL --`)
+- [x] Normal mode: all core motions (h/j/k/l/w/b/e/W/B/E/0/$/^/gg/G/{/}/%/f/F/t/T/;,)
+- [x] Normal mode: insert entry (i/I/a/A/o/O/s/S)
+- [x] Normal mode: operators (d/y/c/</>) with motions, counts, text objects
+- [x] Normal mode: x/X/p/P/J/~, marks, repeat (.)
+- [x] Visual mode: v/V/Ctrl+V, motions extend selection
+- [x] Visual mode: d/c/y/</>/~/u/U operators
+- [x] Command-line mode: : / / / ?
+- [x] Registers (a-z, 0-9, "", "0, "+, "1-"9)
+- [x] Text object resolution (iw/aw/iW/aW/ip/ap/is/as/ib/aB/iB/aB/i"/a"/i'/a')
+- [x] Undo/redo (u/Ctrl+R) with composite insert-session undo
+- [x] Feature gate (`vi-mode` cargo feature, default off)
+- [x] All 450 tests pass
+
+## Fixes Needed (from code review)
+
+### 🔴 Blocking
+- [x] **Paste (`p`) placement off by one** — `cursor += 1` -> `next_char_boundary()`. Also fixed same bug in repeat `.` paste handler.
+- [x] **`%` at position 0 panics** — `cursor.wrapping_sub(1)` wraps to `usize::MAX` when cursor is 0, causing OOB in `match_bracket`. Add early-return guard.
+- [ ] **Normal-mode + visual-mode ops not undoable** — Only `X` calls `push_undo`. Every other buffer-mutating normal/visual op (dd, x, D, J, ~, visual d/c/~/u/U) mutates buffer without pushing undo entry. Need `push_undo()` calls in 8+ locations.
+- [ ] **Visual selection not highlighted** — `visual_start` and `cursor` tracked but never passed to renderer. User can't see what's selected. Need `selected_range` plumbing through `draw_bottom`.
+
+### 🟡 Should Fix
+- [ ] **`t`/`T` motions broken** — They set `pending_fchar_dir` but the `t`/`T` arm in the key handler is dead code. `t` behaves like `f`. Need to fix or remove the `t`/`T` match arms.
+- [ ] **Visual mode ignores `pending_count`** — `5j` works in normal mode but not in `v5j`. Visual motions should read and consume `pending_count`.
+- [ ] **`cmdline_buffer.pop()` breaks on multi-byte UTF-8** — `pop()` removes last byte, not last char. Use `truncate()` at char boundary instead.
+- [ ] **Missing tests for `vi.rs`** — 280+ lines of motion/operator/match_bracket/resolve_text_object logic with zero tests. Every function needs unit tests.
+
+### 🟢 Nits
+- [ ] Remove `#![allow(dead_code)]` from `vi.rs` and the `#[allow(dead_code)]` on `VisualType::Block`
+- [ ] `unwrap_or("").to_string()` allocations — use `unwrap_or_default()` when possible
+- [ ] Remove dead backward-search branch in `resolve_text_object::Brackets`
+- [ ] Verify `apply_motion("j"/"k")` handles empty buffer without panic
+
+## Build & Test
+- [x] `cargo fmt` passes
+- [x] `cargo test` passes (450 tests, with and without `vi-mode` feature)
+- [x] `cargo build` no warnings

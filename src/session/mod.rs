@@ -164,7 +164,7 @@ impl Session {
             .sum();
         self.calibrated_tokens.saturating_add(delta)
     }
-    
+
     /// Pick the compaction boundary: `messages[..cut]` get summarized and
     /// `messages[cut..]` are kept as recent context. Walks backward summing
     /// per-message `estimated_tokens` until `keep_recent` is covered.

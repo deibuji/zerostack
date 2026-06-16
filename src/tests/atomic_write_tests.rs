@@ -86,8 +86,14 @@ async fn preserves_permissions_on_overwrite() {
     atomic_write(&f, b"#!/bin/sh\necho new\n").await.unwrap();
 
     let mode = std::fs::metadata(&f).unwrap().permissions().mode() & 0o777;
-    assert_eq!(mode, 0o755, "executable bit must survive the atomic replace");
-    assert_eq!(std::fs::read_to_string(&f).unwrap(), "#!/bin/sh\necho new\n");
+    assert_eq!(
+        mode, 0o755,
+        "executable bit must survive the atomic replace"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&f).unwrap(),
+        "#!/bin/sh\necho new\n"
+    );
 }
 
 #[cfg(unix)]
@@ -129,8 +135,18 @@ async fn writes_through_symlink_chain() {
 
     atomic_write(&link2, b"via chain").await.unwrap();
 
-    assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
-    assert!(std::fs::symlink_metadata(&link2).unwrap().file_type().is_symlink());
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert!(
+        std::fs::symlink_metadata(&link2)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
     assert_eq!(std::fs::read_to_string(&real).unwrap(), "via chain");
 }
 
@@ -147,7 +163,12 @@ async fn resolves_relative_symlink_target() {
 
     atomic_write(&link, b"relative ok").await.unwrap();
 
-    assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
     assert_eq!(std::fs::read_to_string(&real).unwrap(), "relative ok");
 }
 
