@@ -1402,6 +1402,21 @@ impl InputEditor {
 
     #[cfg(feature = "vi-mode")]
     fn handle_vi_visual_key(&mut self, key: KeyEvent) -> Option<CompactString> {
+        // Accumulate digit counts, like normal mode
+        if let KeyCode::Char(c) = key.code {
+            if c.is_ascii_digit() && c != '0' {
+                self.vi_state.pending_count =
+                    self.vi_state.pending_count * 10 + (c as u32 - b'0' as u32);
+                return None;
+            }
+            if c == '0' && self.vi_state.pending_count > 0 {
+                self.vi_state.pending_count *= 10;
+                return None;
+            }
+        }
+
+        let count = self.vi_state.pending_count.max(1) as usize;
+        self.vi_state.pending_count = 0;
         match key.code {
             KeyCode::Esc => {
                 self.vi_state.mode = ViMode::Normal;
@@ -1418,13 +1433,15 @@ impl InputEditor {
                 None
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, 1, "j", &self.vi_state) {
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "j", &self.vi_state)
+                {
                     self.cursor = c;
                 }
                 None
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, 1, "k", &self.vi_state) {
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "k", &self.vi_state)
+                {
                     self.cursor = c;
                 }
                 None
@@ -1436,19 +1453,22 @@ impl InputEditor {
                 None
             }
             KeyCode::Char('w') => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, 1, "w", &self.vi_state) {
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "w", &self.vi_state)
+                {
                     self.cursor = c;
                 }
                 None
             }
             KeyCode::Char('b') => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, 1, "b", &self.vi_state) {
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "b", &self.vi_state)
+                {
                     self.cursor = c;
                 }
                 None
             }
             KeyCode::Char('e') => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, 1, "e", &self.vi_state) {
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "e", &self.vi_state)
+                {
                     self.cursor = c;
                 }
                 None
@@ -1598,7 +1618,14 @@ impl InputEditor {
             KeyCode::Backspace => {
                 if self.vi_state.cmdline_cursor > 0 {
                     self.vi_state.cmdline_cursor -= 1;
-                    self.vi_state.cmdline_buffer.pop(); // Only works for ASCII but OK for commands
+                    let idx = self
+                        .vi_state
+                        .cmdline_buffer
+                        .char_indices()
+                        .next_back()
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                    self.vi_state.cmdline_buffer.truncate(idx);
                 }
                 None
             }
@@ -1640,7 +1667,14 @@ impl InputEditor {
             KeyCode::Backspace => {
                 if self.vi_state.cmdline_cursor > 0 {
                     self.vi_state.cmdline_cursor -= 1;
-                    self.vi_state.cmdline_buffer.pop();
+                    let idx = self
+                        .vi_state
+                        .cmdline_buffer
+                        .char_indices()
+                        .next_back()
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                    self.vi_state.cmdline_buffer.truncate(idx);
                 }
                 None
             }

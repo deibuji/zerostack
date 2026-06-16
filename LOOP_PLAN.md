@@ -26,8 +26,8 @@
 
 ### 🟡 Should Fix
 - [x] **`t`/`T` motions broken** — Added `pending_fchar_is_t` / `last_fchar_is_t` flags to ViState. `t`/`T` now correctly set these and dispatch to `"t"`/`"T"` motions (cursor before/after the target char). `;` and `,` repeat respect `last_fchar_is_t`. Also fixed pre-existing borrow-checker error in `push_undo` calls by extracting `commit_vi_undo()` helper.
-- [ ] **Visual mode ignores `pending_count`** — `5j` works in normal mode but not in `v5j`. Visual motions should read and consume `pending_count`.
-- [ ] **`cmdline_buffer.pop()` breaks on multi-byte UTF-8** — `pop()` removes last byte, not last char. Use `truncate()` at char boundary instead.
+- [x] **Visual mode ignores `pending_count`** — `5j` works in normal mode but not in `v5j`. Visual motions should read and consume `pending_count`.
+- [x] **`cmdline_buffer.pop()` breaks on multi-byte UTF-8** — `pop()` removes last byte, not last char. Use `truncate()` at char boundary instead.
 - [ ] **Missing tests for `vi.rs`** — 280+ lines of motion/operator/match_bracket/resolve_text_object logic with zero tests. Every function needs unit tests.
 
 ### 🟢 Nits
