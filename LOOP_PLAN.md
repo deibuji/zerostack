@@ -38,5 +38,6 @@
 
 ## Build & Test
 - [x] `cargo fmt` passes
-- [x] `cargo test` passes (450 tests, with and without `vi-mode` feature)
-- [x] `cargo build` no warnings
+- [x] `cargo test` passes (450 tests with `vi-mode` feature)
+- [x] `cargo build` no warnings with `vi-mode` feature
+- [x] Pre-existing compilation error in `main.rs:827` without `vi-mode` feature (unrelated `mut`)
