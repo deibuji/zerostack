@@ -1605,6 +1605,15 @@ impl InputEditor {
     }
 
     #[cfg(feature = "vi-mode")]
+    pub fn vi_visual_selection(&self) -> Option<(usize, usize)> {
+        if matches!(self.vi_state.mode, ViMode::Visual(_)) {
+            Some(self.vi_selection_range())
+        } else {
+            None
+        }
+    }
+
+    #[cfg(feature = "vi-mode")]
     fn handle_vi_cmdline_key(&mut self, key: KeyEvent) -> Option<CompactString> {
         match key.code {
             KeyCode::Esc => {

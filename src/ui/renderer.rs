@@ -595,6 +595,7 @@ impl Renderer {
         chain_badge: Option<&str>,
         is_running: bool,
         mode_label: &str,
+        vi_selection: Option<(usize, usize)>,
     ) -> io::Result<()> {
         let (cols, rows) = crossterm::terminal::size()?;
         let mut stdout = io::stdout();
@@ -941,12 +942,26 @@ impl Renderer {
             } else {
                 0
             };
-            let display: String = line_chars
-                .iter()
-                .skip(skip_chars)
-                .take(visible_width)
-                .collect();
-            write!(stdout, "{}", display)?;
+            let line_start_byte: usize = lines[..i].iter().map(|s| s.len() + 1).sum();
+            let mut byte_offset = line_start_byte
+                + line_chars[..skip_chars]
+                    .iter()
+                    .map(|c| c.len_utf8())
+                    .sum::<usize>();
+            for &ch in line_chars.iter().skip(skip_chars).take(visible_width) {
+                if let Some((s, e)) = vi_selection {
+                    if byte_offset >= s && byte_offset < e {
+                        write!(stdout, "{}", SetAttribute(Attribute::Reverse))?;
+                        write!(stdout, "{}", ch)?;
+                        write!(stdout, "{}", SetAttribute(Attribute::NoReverse))?;
+                    } else {
+                        write!(stdout, "{}", ch)?;
+                    }
+                } else {
+                    write!(stdout, "{}", ch)?;
+                }
+                byte_offset += ch.len_utf8();
+            }
             write!(stdout, "{}", Clear(ClearType::UntilNewLine))?;
             write!(stdout, "{}", ResetColor)?;
         }

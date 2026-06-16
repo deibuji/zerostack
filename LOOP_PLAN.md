@@ -22,7 +22,7 @@
 - [x] **Paste (`p`) placement off by one** — `cursor += 1` -> `next_char_boundary()`. Also fixed same bug in repeat `.` paste handler.
 - [x] **`%` at position 0 panics** — `cursor.wrapping_sub(1)` wraps to `usize::MAX` when cursor is 0, causing OOB in `match_bracket`. Add early-return guard.
 - [x] **Normal-mode + visual-mode ops not undoable** — Added `push_undo()` after all buffer-mutating normal/visual ops: `x`, `D`, `dd`, `>>`, `<<`, `p`, `P`, `J`, `~`, `.`, visual `d`, visual `~`. Also implemented previously-missing `x` (delete char under cursor). Simplified `X` to use same `insert_start_buf` pattern as everything else.
-- [ ] **Visual selection not highlighted** — `visual_start` and `cursor` tracked but never passed to renderer. User can't see what's selected. Need `selected_range` plumbing through `draw_bottom`.
+- [x] **Visual selection not highlighted** — Added `vi_selection: Option<(usize, usize)>` param to `draw_bottom()`. Input loop passes `vi_visual_selection()` (returns `Some(range)` in visual mode). Renderer writes each char individually with reverse-video for selected range.
 
 ### 🟡 Should Fix
 - [ ] **`t`/`T` motions broken** — They set `pending_fchar_dir` but the `t`/`T` arm in the key handler is dead code. `t` behaves like `f`. Need to fix or remove the `t`/`T` match arms.
