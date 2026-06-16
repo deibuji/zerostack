@@ -126,8 +126,10 @@ pub struct ViState {
     pub pending_text_object: bool,
     pub pending_g: bool,
     pub pending_fchar_dir: Option<Direction>,
+    pub pending_fchar_is_t: bool,
     pub last_fchar: Option<char>,
     pub last_fchar_dir: Option<Direction>,
+    pub last_fchar_is_t: bool,
     pub last_search: Option<String>,
     pub last_search_dir: Option<Direction>,
     pub visual_start: usize,
@@ -156,8 +158,10 @@ impl ViState {
             pending_text_object: false,
             pending_g: false,
             pending_fchar_dir: None,
+            pending_fchar_is_t: false,
             last_fchar: None,
             last_fchar_dir: None,
+            last_fchar_is_t: false,
             last_search: None,
             last_search_dir: None,
             visual_start: 0,
@@ -734,7 +738,12 @@ pub fn apply_motion(
         }
         ";" => {
             if let Some(dir) = vi.last_fchar_dir {
-                let m = if dir == Direction::Forward { "f" } else { "F" };
+                let m = match (dir, vi.last_fchar_is_t) {
+                    (Direction::Forward, true) => "t",
+                    (Direction::Forward, false) => "f",
+                    (Direction::Backward, true) => "T",
+                    (Direction::Backward, false) => "F",
+                };
                 apply_motion(buf, cursor, cnt, m, vi)
             } else {
                 None
@@ -742,7 +751,12 @@ pub fn apply_motion(
         }
         "," => {
             if let Some(dir) = vi.last_fchar_dir {
-                let m = if dir == Direction::Forward { "F" } else { "f" };
+                let m = match (dir, vi.last_fchar_is_t) {
+                    (Direction::Forward, true) => "T",
+                    (Direction::Forward, false) => "F",
+                    (Direction::Backward, true) => "t",
+                    (Direction::Backward, false) => "f",
+                };
                 apply_motion(buf, cursor, cnt, m, vi)
             } else {
                 None
