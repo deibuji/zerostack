@@ -883,8 +883,8 @@ impl InputEditor {
         // Only consume pending_count when the key is actually a motion
         let motion = match key {
             KeyCode::Char('h') | KeyCode::Left => "h",
-            KeyCode::Char('j') | KeyCode::Down => "j",
-            KeyCode::Char('k') | KeyCode::Up => "k",
+            KeyCode::Char('j') => "j",
+            KeyCode::Char('k') => "k",
             KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => "l",
             KeyCode::Char('w') => "w",
             KeyCode::Char('W') => "W",
@@ -946,6 +946,16 @@ impl InputEditor {
 
     #[cfg(feature = "vi-mode")]
     fn handle_vi_normal_key(&mut self, key: KeyEvent) -> Option<CompactString> {
+        // Arrow keys and Ctrl+N/P navigate history in all modes
+        if matches!(
+            key.code,
+            KeyCode::Up | KeyCode::Down
+        ) || (matches!(key.code, KeyCode::Char('n') | KeyCode::Char('p'))
+            && key.modifiers.contains(KeyModifiers::CONTROL))
+        {
+            return self.handle_key_impl(key);
+        }
+
         // Handle register prefix: "x waits for register char
         if self.vi_state.pending_register.is_some()
             && matches!(
@@ -976,8 +986,8 @@ impl InputEditor {
         {
             let motion = match key.code {
                 KeyCode::Char('h') | KeyCode::Left => Some("h"),
-                KeyCode::Char('j') | KeyCode::Down => Some("j"),
-                KeyCode::Char('k') | KeyCode::Up => Some("k"),
+                KeyCode::Char('j') => Some("j"),
+                KeyCode::Char('k') => Some("k"),
                 KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => Some("l"),
                 KeyCode::Char('w') => Some("w"),
                 KeyCode::Char('W') => Some("W"),
@@ -1001,7 +1011,8 @@ impl InputEditor {
                 self.apply_vi_motion_or_op(m);
                 return None;
             }
-            self.vi_state.pending_op = None;
+            // Don't clear pending_op here — let the main match handle
+            // double-operator keys (dd, yy, cc, etc.) and operator arms.
             self.vi_state.pending_g = false;
             self.vi_state.pending_fchar_dir = None;
             self.vi_state.pending_fchar_is_t = false;
@@ -1451,6 +1462,16 @@ impl InputEditor {
 
     #[cfg(feature = "vi-mode")]
     fn handle_vi_visual_key(&mut self, key: KeyEvent) -> Option<CompactString> {
+        // Arrow keys and Ctrl+N/P navigate history in all modes
+        if matches!(
+            key.code,
+            KeyCode::Up | KeyCode::Down
+        ) || (matches!(key.code, KeyCode::Char('n') | KeyCode::Char('p'))
+            && key.modifiers.contains(KeyModifiers::CONTROL))
+        {
+            return self.handle_key_impl(key);
+        }
+
         // Accumulate digit counts, like normal mode
         if let KeyCode::Char(c) = key.code {
             if c.is_ascii_digit() && c != '0' {
