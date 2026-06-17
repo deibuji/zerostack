@@ -833,23 +833,33 @@ impl InputEditor {
     }
 
     #[cfg(feature = "vi-mode")]
-    fn handle_vi_normal_key(&mut self, key: KeyEvent) -> Option<CompactString> {
+    /// Shared motion dispatch for normal and visual mode.
+    /// Handles pending_prefixes (pending_g, pending_fchar_dir), key→motion
+    /// mapping, and applies the motion. Reads pending_count internally.
+    /// Returns true if the key was consumed (motion handled or pending state set).
+    fn handle_vi_motion(&mut self, key: KeyCode) -> bool {
+        // Handle pending gg prefix (always consumes pending_count)
         if self.vi_state.pending_g {
+            let cnt = self.vi_state.pending_count.max(1) as usize;
+            self.vi_state.pending_count = 0;
             self.vi_state.pending_g = false;
-            return match key.code {
-                KeyCode::Char('g') => {
-                    self.apply_vi_motion_or_op("gg");
-                    None
+            if let KeyCode::Char('g') = key {
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, cnt, "gg", &self.vi_state)
+                {
+                    self.cursor = c;
                 }
-                _ => None,
-            };
+            }
+            return true;
         }
 
+        // Handle pending f/F/t/T prefix (always consumes pending_count)
         if self.vi_state.pending_fchar_dir.is_some() {
+            let count = self.vi_state.pending_count.max(1) as usize;
+            self.vi_state.pending_count = 0;
             let dir = self.vi_state.pending_fchar_dir.take();
             let is_t = self.vi_state.pending_fchar_is_t;
             self.vi_state.pending_fchar_is_t = false;
-            if let KeyCode::Char(c) = key.code {
+            if let KeyCode::Char(c) = key {
                 self.vi_state.last_fchar = Some(c);
                 self.vi_state.last_fchar_dir = dir;
                 self.vi_state.last_fchar_is_t = is_t;
@@ -860,11 +870,82 @@ impl InputEditor {
                     (Some(Direction::Backward), false) => "F",
                     _ => "f",
                 };
-                self.apply_vi_motion_or_op(motion);
+                if let Some(c) =
+                    apply_motion(&self.buffer, self.cursor, count, motion, &self.vi_state)
+                {
+                    self.cursor = c;
+                }
             }
-            return None;
+            return true;
         }
 
+        // Map key to motion and apply
+        // Only consume pending_count when the key is actually a motion
+        let motion = match key {
+            KeyCode::Char('h') | KeyCode::Left => "h",
+            KeyCode::Char('j') | KeyCode::Down => "j",
+            KeyCode::Char('k') | KeyCode::Up => "k",
+            KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => "l",
+            KeyCode::Char('w') => "w",
+            KeyCode::Char('W') => "W",
+            KeyCode::Char('b') => "b",
+            KeyCode::Char('B') => "B",
+            KeyCode::Char('e') => "e",
+            KeyCode::Char('E') => "E",
+            KeyCode::Char('$') | KeyCode::End => "$",
+            KeyCode::Char('^') => "^",
+            KeyCode::Home => "home",
+            KeyCode::Char('G') => "G",
+            KeyCode::Char('{') => "{",
+            KeyCode::Char('}') => "}",
+            KeyCode::Char('%') => "%",
+            KeyCode::Char(';') => ";",
+            KeyCode::Char(',') => ",",
+            // Keys that set pending state for next call (don't consume count yet)
+            KeyCode::Char('g') => {
+                self.vi_state.pending_g = true;
+                return true;
+            }
+            KeyCode::Char('f') => {
+                self.vi_state.pending_fchar_dir = Some(Direction::Forward);
+                return true;
+            }
+            KeyCode::Char('F') => {
+                self.vi_state.pending_fchar_dir = Some(Direction::Backward);
+                return true;
+            }
+            KeyCode::Char('t') => {
+                self.vi_state.pending_fchar_dir = Some(Direction::Forward);
+                self.vi_state.pending_fchar_is_t = true;
+                return true;
+            }
+            KeyCode::Char('T') => {
+                self.vi_state.pending_fchar_dir = Some(Direction::Backward);
+                self.vi_state.pending_fchar_is_t = true;
+                return true;
+            }
+            // 0 is a motion only when not accumulating a count
+            KeyCode::Char('0') => {
+                let count = self.vi_state.pending_count.max(1) as usize;
+                self.vi_state.pending_count = 0;
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "0", &self.vi_state)
+                {
+                    self.cursor = c;
+                }
+                return true;
+            }
+            _ => return false,
+        };
+        let count = self.vi_state.pending_count.max(1) as usize;
+        self.vi_state.pending_count = 0;
+        if let Some(c) = apply_motion(&self.buffer, self.cursor, count, motion, &self.vi_state) {
+            self.cursor = c;
+        }
+        true
+    }
+
+    #[cfg(feature = "vi-mode")]
+    fn handle_vi_normal_key(&mut self, key: KeyEvent) -> Option<CompactString> {
         // Handle register prefix: "x waits for register char
         if self.vi_state.pending_register.is_some()
             && matches!(
@@ -878,111 +959,67 @@ impl InputEditor {
             if let KeyCode::Char(c) = key.code {
                 self.vi_state.pending_register = Some(c);
             }
-            // Don't execute yet — wait for the actual command
             return None;
         }
 
         // Handle pending text object prefix (i/a after operator)
         if self.vi_state.pending_text_object {
             self.vi_state.pending_text_object = false;
-            // For now, just clear pending_op — we don't implement text objects here
             self.vi_state.pending_op = None;
+            return None;
+        }
+
+        // If pending_op/g/fchar is set, try operator+motion path
+        if self.vi_state.pending_op.is_some()
+            || self.vi_state.pending_g
+            || self.vi_state.pending_fchar_dir.is_some()
+        {
+            let motion = match key.code {
+                KeyCode::Char('h') | KeyCode::Left => Some("h"),
+                KeyCode::Char('j') | KeyCode::Down => Some("j"),
+                KeyCode::Char('k') | KeyCode::Up => Some("k"),
+                KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => Some("l"),
+                KeyCode::Char('w') => Some("w"),
+                KeyCode::Char('W') => Some("W"),
+                KeyCode::Char('b') => Some("b"),
+                KeyCode::Char('B') => Some("B"),
+                KeyCode::Char('e') => Some("e"),
+                KeyCode::Char('E') => Some("E"),
+                KeyCode::Char('0') if self.vi_state.pending_count == 0 => Some("0"),
+                KeyCode::Char('$') | KeyCode::End => Some("$"),
+                KeyCode::Char('^') => Some("^"),
+                KeyCode::Home => Some("home"),
+                KeyCode::Char('G') => Some("G"),
+                KeyCode::Char('{') => Some("{"),
+                KeyCode::Char('}') => Some("}"),
+                KeyCode::Char('%') => Some("%"),
+                KeyCode::Char(';') => Some(";"),
+                KeyCode::Char(',') => Some(","),
+                _ => None,
+            };
+            if let Some(m) = motion {
+                self.apply_vi_motion_or_op(m);
+                return None;
+            }
+            self.vi_state.pending_op = None;
+            self.vi_state.pending_g = false;
+            self.vi_state.pending_fchar_dir = None;
+            self.vi_state.pending_fchar_is_t = false;
+        }
+
+        // Pure motion (no operator) or other command
+        if self.handle_vi_motion(key.code) {
             return None;
         }
 
         match key.code {
             KeyCode::Esc => {
                 self.vi_state.pending_op = None;
-                self.vi_state.pending_count = 0;
                 self.vi_state.pending_register = None;
                 self.vi_state.pending_text_object = false;
                 self.vi_state.pending_g = false;
-                None
-            }
-
-            // ---- Motions ----
-            KeyCode::Char('h') | KeyCode::Left => {
-                self.apply_vi_motion_or_op("h");
-                None
-            }
-            KeyCode::Char('j') | KeyCode::Down => {
-                self.apply_vi_motion_or_op("j");
-                None
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                self.apply_vi_motion_or_op("k");
-                None
-            }
-            KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => {
-                self.apply_vi_motion_or_op("l");
-                None
-            }
-            KeyCode::Char('w') => {
-                self.apply_vi_motion_or_op("w");
-                None
-            }
-            KeyCode::Char('b') => {
-                self.apply_vi_motion_or_op("b");
-                None
-            }
-            KeyCode::Char('e') => {
-                self.apply_vi_motion_or_op("e");
-                None
-            }
-            KeyCode::Char('W') => {
-                self.apply_vi_motion_or_op("W");
-                None
-            }
-            KeyCode::Char('B') => {
-                self.apply_vi_motion_or_op("B");
-                None
-            }
-            KeyCode::Char('E') => {
-                self.apply_vi_motion_or_op("E");
-                None
-            }
-            KeyCode::Char('0') => {
-                if self.vi_state.pending_count == 0 {
-                    self.apply_vi_motion_or_op("0");
-                } else {
-                    self.vi_state.pending_count *= 10;
-                }
-                None
-            }
-            KeyCode::Char('$') | KeyCode::End => {
-                self.apply_vi_motion_or_op("$");
-                None
-            }
-            KeyCode::Char('^') => {
-                self.apply_vi_motion_or_op("^");
-                None
-            }
-            KeyCode::Home => {
-                self.apply_vi_motion_or_op("home");
-                None
-            }
-            KeyCode::Char('G') => {
-                self.apply_vi_motion_or_op("G");
-                None
-            }
-            KeyCode::Char('{') => {
-                self.apply_vi_motion_or_op("{");
-                None
-            }
-            KeyCode::Char('}') => {
-                self.apply_vi_motion_or_op("}");
-                None
-            }
-            KeyCode::Char('%') => {
-                self.apply_vi_motion_or_op("%");
-                None
-            }
-            KeyCode::Char(';') => {
-                self.apply_vi_motion_or_op(";");
-                None
-            }
-            KeyCode::Char(',') => {
-                self.apply_vi_motion_or_op(",");
+                self.vi_state.pending_fchar_dir = None;
+                self.vi_state.pending_fchar_is_t = false;
                 None
             }
 
@@ -1427,45 +1464,8 @@ impl InputEditor {
             }
         }
 
-        let count = self.vi_state.pending_count.max(1) as usize;
-        self.vi_state.pending_count = 0;
-
-        // pending_g: wait for second 'g' to trigger 'gg'
-        if self.vi_state.pending_g {
-            self.vi_state.pending_g = false;
-            return match key.code {
-                KeyCode::Char('g') => {
-                    self.cursor =
-                        apply_motion(&self.buffer, self.cursor, count, "gg", &self.vi_state)
-                            .unwrap_or(self.cursor);
-                    None
-                }
-                _ => None,
-            };
-        }
-
-        // pending_fchar_dir: wait for target char (f/F/t/T prefix)
-        if self.vi_state.pending_fchar_dir.is_some() {
-            let dir = self.vi_state.pending_fchar_dir.take();
-            let is_t = self.vi_state.pending_fchar_is_t;
-            self.vi_state.pending_fchar_is_t = false;
-            if let KeyCode::Char(c) = key.code {
-                self.vi_state.last_fchar = Some(c);
-                self.vi_state.last_fchar_dir = dir;
-                self.vi_state.last_fchar_is_t = is_t;
-                let motion = match (dir, is_t) {
-                    (Some(Direction::Forward), true) => "t",
-                    (Some(Direction::Forward), false) => "f",
-                    (Some(Direction::Backward), true) => "T",
-                    (Some(Direction::Backward), false) => "F",
-                    _ => "f",
-                };
-                if let Some(c) =
-                    apply_motion(&self.buffer, self.cursor, count, motion, &self.vi_state)
-                {
-                    self.cursor = c;
-                }
-            }
+        // Let shared method handle motions and pending prefixes (gg, f/F/t/T)
+        if self.handle_vi_motion(key.code) {
             return None;
         }
 
@@ -1474,155 +1474,9 @@ impl InputEditor {
                 self.vi_state.mode = ViMode::Normal;
                 self.vi_state.pending_op = None;
                 self.vi_state.pending_g = false;
+                self.vi_state.pending_fchar_dir = None;
+                self.vi_state.pending_fchar_is_t = false;
                 self.update_vi_mode_label();
-                None
-            }
-
-            // Motions extend selection (via apply_motion so count is honored)
-            KeyCode::Char('h') | KeyCode::Left => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "h", &self.vi_state)
-                {
-                    self.cursor = c;
-                }
-                None
-            }
-            KeyCode::Char('j') | KeyCode::Down => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "j", &self.vi_state)
-                {
-                    self.cursor = c;
-                }
-                None
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "k", &self.vi_state)
-                {
-                    self.cursor = c;
-                }
-                None
-            }
-            KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "l", &self.vi_state)
-                {
-                    self.cursor = c;
-                }
-                None
-            }
-            KeyCode::Char('w') => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "w", &self.vi_state)
-                {
-                    self.cursor = c;
-                }
-                None
-            }
-            KeyCode::Char('W') => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "W", &self.vi_state)
-                {
-                    self.cursor = c;
-                }
-                None
-            }
-            KeyCode::Char('b') => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "b", &self.vi_state)
-                {
-                    self.cursor = c;
-                }
-                None
-            }
-            KeyCode::Char('B') => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "B", &self.vi_state)
-                {
-                    self.cursor = c;
-                }
-                None
-            }
-            KeyCode::Char('e') => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "e", &self.vi_state)
-                {
-                    self.cursor = c;
-                }
-                None
-            }
-            KeyCode::Char('E') => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "E", &self.vi_state)
-                {
-                    self.cursor = c;
-                }
-                None
-            }
-            KeyCode::Char('0') | KeyCode::Home => {
-                self.cursor = 0;
-                None
-            }
-            KeyCode::Char('$') | KeyCode::End => {
-                self.cursor = self.buffer.len();
-                None
-            }
-            KeyCode::Char('^') => {
-                self.cursor = ViState::first_non_whitespace(&self.buffer, self.cursor);
-                None
-            }
-            KeyCode::Char('g') => {
-                self.vi_state.pending_g = true;
-                None
-            }
-            KeyCode::Char('G') => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "G", &self.vi_state)
-                {
-                    self.cursor = c;
-                }
-                None
-            }
-            KeyCode::Char('{') => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "{", &self.vi_state)
-                {
-                    self.cursor = c;
-                }
-                None
-            }
-            KeyCode::Char('}') => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "}", &self.vi_state)
-                {
-                    self.cursor = c;
-                }
-                None
-            }
-            KeyCode::Char('%') => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "%", &self.vi_state)
-                {
-                    self.cursor = c;
-                }
-                None
-            }
-            KeyCode::Char(';') => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, ";", &self.vi_state)
-                {
-                    self.cursor = c;
-                }
-                None
-            }
-            KeyCode::Char(',') => {
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, ",", &self.vi_state)
-                {
-                    self.cursor = c;
-                }
-                None
-            }
-            KeyCode::Char('f') => {
-                self.vi_state.pending_fchar_dir = Some(Direction::Forward);
-                None
-            }
-            KeyCode::Char('F') => {
-                self.vi_state.pending_fchar_dir = Some(Direction::Backward);
-                None
-            }
-            KeyCode::Char('t') => {
-                self.vi_state.pending_fchar_dir = Some(Direction::Forward);
-                self.vi_state.pending_fchar_is_t = true;
-                None
-            }
-            KeyCode::Char('T') => {
-                self.vi_state.pending_fchar_dir = Some(Direction::Backward);
-                self.vi_state.pending_fchar_is_t = true;
                 None
             }
 

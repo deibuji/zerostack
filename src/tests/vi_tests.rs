@@ -1177,3 +1177,51 @@ fn motion_E_twice() {
     let c2 = apply_motion(buf, c1, 1, "E", &vi).unwrap();
     assert_eq!(c2, 10, "second E should go to end of 'world'");
 }
+
+#[test]
+fn motion_F_at_cursor_zero() {
+    let mut vi = make_vi();
+    vi.last_fchar = Some('h');
+    assert_eq!(
+        apply_motion("hello", 0, 1, "F", &vi),
+        None,
+        "F at cursor 0 should return None (no char before cursor)"
+    );
+}
+
+#[test]
+fn motion_T_at_cursor_zero() {
+    let mut vi = make_vi();
+    vi.last_fchar = Some('h');
+    assert_eq!(
+        apply_motion("hello", 0, 1, "T", &vi),
+        None,
+        "T at cursor 0 should return None (no char before cursor)"
+    );
+}
+
+#[test]
+fn motion_t_count_finds_nth() {
+    let mut vi = make_vi();
+    vi.last_fchar = Some('o');
+    // "hello world": 'o' appears at positions 4 and 7
+    // 2nd 'o' with t should land before it at pos 6 ('r')
+    assert_eq!(
+        apply_motion("hello world", 0, 2, "t", &vi),
+        Some(6),
+        "2t o should stop before 2nd 'o'"
+    );
+}
+
+#[test]
+fn motion_T_count_finds_nth() {
+    let mut vi = make_vi();
+    vi.last_fchar = Some('l');
+    // "hello world": 'l' appears at positions 2, 3, and 9
+    // From end, 2nd 'l' with T should land after it at pos 4
+    assert_eq!(
+        apply_motion("hello world", 11, 2, "T", &vi),
+        Some(4),
+        "2nd T l from end should land after 2nd 'l'"
+    );
+}

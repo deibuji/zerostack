@@ -751,7 +751,10 @@ pub fn apply_motion(
         }
         "F" => {
             if let Some(ch) = vi.last_fchar {
-                let mut c = cursor.wrapping_sub(1);
+                if cursor == 0 {
+                    return None;
+                }
+                let mut c = cursor - 1;
                 let mut found = 0u32;
                 loop {
                     if chars[c] == ch {
@@ -771,9 +774,13 @@ pub fn apply_motion(
         "t" => {
             if let Some(ch) = vi.last_fchar {
                 let mut c = cursor + 1;
+                let mut found = 0u32;
                 while c < len {
                     if chars[c] == ch {
-                        return Some(c.saturating_sub(1));
+                        found += 1;
+                        if found >= cnt as u32 {
+                            return Some(c.saturating_sub(1));
+                        }
                     }
                     c += 1;
                 }
@@ -782,10 +789,17 @@ pub fn apply_motion(
         }
         "T" => {
             if let Some(ch) = vi.last_fchar {
-                let mut c = cursor.wrapping_sub(1);
+                if cursor == 0 {
+                    return None;
+                }
+                let mut c = cursor - 1;
+                let mut found = 0u32;
                 loop {
                     if chars[c] == ch {
-                        return Some(c + 1);
+                        found += 1;
+                        if found >= cnt as u32 {
+                            return Some(c + 1);
+                        }
                     }
                     if c == 0 {
                         break;
