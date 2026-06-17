@@ -295,6 +295,16 @@ impl ViState {
             return 0;
         }
         let mut i = cursor.min(chars.len().saturating_sub(1));
+        // If we're at the first character of a word (previous char is whitespace
+        // or we're at position 0), step back so we find the PREVIOUS word,
+        // not this word.
+        if !chars[i].is_whitespace()
+            && (i == 0 || chars[i.saturating_sub(1)].is_whitespace())
+        {
+            if i > 0 {
+                i -= 1;
+            }
+        }
         // Skip whitespace before cursor
         while i > 0 && chars[i].is_whitespace() {
             i -= 1;
@@ -320,17 +330,36 @@ impl ViState {
             return len;
         }
         let mut i = cursor;
-        // Skip current word
-        while i < len
-            && !chars[i].is_whitespace()
-            && (big || chars[i].is_alphanumeric() || chars[i] == '_')
-        {
-            i += 1;
-        }
-        if i < len
-            && !chars[i].is_whitespace()
-            && (big || !chars[i].is_alphanumeric() && chars[i] != '_')
-        {
+        loop {
+            // Skip whitespace between words
+            while i < len && chars[i].is_whitespace() {
+                i += 1;
+            }
+            if i >= len {
+                return len;
+            }
+            // Skip the word
+            while i < len
+                && !chars[i].is_whitespace()
+                && (big || chars[i].is_alphanumeric() || chars[i] == '_')
+            {
+                i += 1;
+            }
+            // Skip trailing non-word non-space chars (punctuation, for small-word mode)
+            if i < len
+                && !chars[i].is_whitespace()
+                && (big || !chars[i].is_alphanumeric() && chars[i] != '_')
+            {
+                i += 1;
+            }
+            // If we advanced past the starting cursor, we found the next word end
+            if i > cursor {
+                break;
+            }
+            // Safety: advance at least one char to avoid infinite loop
+            if i >= len {
+                return len;
+            }
             i += 1;
         }
         i
@@ -642,7 +671,17 @@ pub fn apply_motion(
         "e" => {
             let mut c = cursor;
             for _ in 0..cnt {
-                c = ViState::next_word_end(buf, c, false);
+                let next = ViState::next_word_end(buf, c, false);
+                if next.saturating_sub(1) <= c {
+                    // Already at the last char of a word; advance past it
+                    // so next_word_end finds the NEXT word's end
+                    if c < buf.len() {
+                        c = next_char_boundary(buf, c);
+                    }
+                    c = ViState::next_word_end(buf, c, false);
+                } else {
+                    c = next;
+                }
             }
             Some(c.saturating_sub(1).max(cursor))
         }
@@ -663,7 +702,16 @@ pub fn apply_motion(
         "E" => {
             let mut c = cursor;
             for _ in 0..cnt {
-                c = ViState::next_word_end(buf, c, true);
+                let next = ViState::next_word_end(buf, c, true);
+                if next.saturating_sub(1) <= c {
+                    // Already at the last char of a word; advance past it
+                    if c < buf.len() {
+                        c = next_char_boundary(buf, c);
+                    }
+                    c = ViState::next_word_end(buf, c, true);
+                } else {
+                    c = next;
+                }
             }
             Some(c.saturating_sub(1).max(cursor))
         }

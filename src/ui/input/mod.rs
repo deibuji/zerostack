@@ -48,7 +48,7 @@ pub struct InputEditor {
 
 impl InputEditor {
     pub fn new(input_mode: InputMode) -> Self {
-        InputEditor {
+        let mut this = InputEditor {
             buffer: CompactString::new(""),
             cursor: 0,
             input_mode,
@@ -69,7 +69,10 @@ impl InputEditor {
             yank_len: 0,
             #[cfg(feature = "vi-mode")]
             vi_state: ViState::new(),
-        }
+        };
+        #[cfg(feature = "vi-mode")]
+        this.update_vi_mode_label();
+        this
     }
 
     pub fn clear_buffer(&mut self) {

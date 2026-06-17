@@ -818,14 +818,25 @@ impl Renderer {
         };
 
         const SPINNER: &[&str] = &["⠋ ", "⠙ ", "⠹ ", "⠸ ", "⠼ ", "⠴ ", "⠦ ", "⠧ ", "⠇ ", "⠏ "];
-        let prompt = if is_running {
-            let frame = SPINNER[self.spinner_frame as usize];
-            self.spinner_frame = (self.spinner_frame + 1) % SPINNER.len() as u8;
-            frame
+        // Detect vi-style mode labels ("-- INSERT --", "-- NORMAL --", etc.)
+        // These should be shown on the status line, with a short prefix in the text box.
+        let (prompt, vi_status_label): (&str, Option<&str>) = if is_running {
+            (SPINNER[self.spinner_frame as usize], None)
+        } else if mode_label.starts_with("-- ") {
+            // Vi mode: use short prefix, push mode label to status line
+            let prefix = match mode_label {
+                "-- INSERT --" => "i ",
+                "-- NORMAL --" => "> ",
+                "-- VISUAL --" => "v ",
+                "-- VISUAL LINE --" => "V ",
+                "-- VISUAL BLOCK --" => "b ",
+                _ => "> ",
+            };
+            (prefix, Some(mode_label))
         } else if !mode_label.is_empty() {
-            mode_label
+            (mode_label, None)
         } else {
-            "> "
+            ("> ", None)
         };
         let prompt_width = display_width(prompt);
 
@@ -999,7 +1010,13 @@ impl Renderer {
             SetForegroundColor(self.color(Color::DarkGrey))
         )?;
         let status_display = if self.scroll_offset > 0 {
-            format!("-- SCROLL -- {}", status)
+            if let Some(vi) = vi_status_label {
+                format!("{} -- SCROLL -- {}", vi, status)
+            } else {
+                format!("-- SCROLL -- {}", status)
+            }
+        } else if let Some(vi) = vi_status_label {
+            format!("{} {}", vi, status)
         } else {
             status.to_string()
         };

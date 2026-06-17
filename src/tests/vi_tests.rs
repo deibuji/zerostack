@@ -1093,3 +1093,81 @@ fn match_bracket_multibyte_surrounding() {
         Some(5)
     );
 }
+
+#[test]
+fn motion_w_twice() {
+    let vi = make_vi();
+    let buf = "hello world foo";
+    let c1 = apply_motion(buf, 0, 1, "w", &vi).unwrap();
+    assert_eq!(c1, 6, "first w should go to start of 'world'");
+    let c2 = apply_motion(buf, c1, 1, "w", &vi).unwrap();
+    assert_eq!(c2, 12, "second w should go to start of 'foo'");
+}
+
+#[test]
+fn motion_b_from_first_char_of_previous_word() {
+    let vi = make_vi();
+    let buf = "hello world";
+    // From first char of 'world', b should go to start of 'hello'
+    let c = apply_motion(buf, 6, 1, "b", &vi).unwrap();
+    assert_eq!(c, 0, "b from start of 'world' should go to start of 'hello'");
+}
+
+#[test]
+fn motion_b_twice() {
+    let vi = make_vi();
+    let buf = "hello world foo";
+    // From last char of buffer, b twice
+    let c1 = apply_motion(buf, 14, 1, "b", &vi).unwrap();
+    assert_eq!(c1, 12, "first b from end should go to start of 'foo'");
+    let c2 = apply_motion(buf, c1, 1, "b", &vi).unwrap();
+    assert_eq!(c2, 6, "second b should go to start of 'world'");
+}
+
+#[test]
+fn motion_e_twice() {
+    let vi = make_vi();
+    let buf = "hello world foo";
+    let c1 = apply_motion(buf, 0, 1, "e", &vi).unwrap();
+    assert_eq!(c1, 4, "first e from start should go to end of 'hello'");
+    let c2 = apply_motion(buf, c1, 1, "e", &vi).unwrap();
+    assert_eq!(c2, 10, "second e should go to end of 'world'");
+}
+
+#[test]
+fn motion_W_twice() {
+    let vi = make_vi();
+    let buf = "hello world foo";
+    let c1 = apply_motion(buf, 0, 1, "W", &vi).unwrap();
+    assert_eq!(c1, 6, "first W from start should go to start of 'world'");
+    let c2 = apply_motion(buf, c1, 1, "W", &vi).unwrap();
+    assert_eq!(c2, 12, "second W should go to start of 'foo'");
+}
+
+#[test]
+fn motion_B_from_first_char_of_previous_word() {
+    let vi = make_vi();
+    let buf = "hello world";
+    let c = apply_motion(buf, 6, 1, "B", &vi).unwrap();
+    assert_eq!(c, 0, "B from start of 'world' should go to start of 'hello'");
+}
+
+#[test]
+fn motion_B_twice() {
+    let vi = make_vi();
+    let buf = "hello world foo";
+    let c1 = apply_motion(buf, 14, 1, "B", &vi).unwrap();
+    assert_eq!(c1, 12, "first B from end should go to start of 'foo'");
+    let c2 = apply_motion(buf, c1, 1, "B", &vi).unwrap();
+    assert_eq!(c2, 6, "second B should go to start of 'world'");
+}
+
+#[test]
+fn motion_E_twice() {
+    let vi = make_vi();
+    let buf = "hello world foo";
+    let c1 = apply_motion(buf, 0, 1, "E", &vi).unwrap();
+    assert_eq!(c1, 4, "first E from start should go to end of 'hello'");
+    let c2 = apply_motion(buf, c1, 1, "E", &vi).unwrap();
+    assert_eq!(c2, 10, "second E should go to end of 'world'");
+}
