@@ -2,7 +2,7 @@ use std::io::{self, Write};
 
 use compact_str::CompactString;
 use crossterm::ExecutableCommand;
-use crossterm::cursor::{Hide, MoveTo, Show};
+use crossterm::cursor::{Hide, MoveTo, SetCursorStyle, Show};
 use crossterm::style::{
     Attribute, Color, ResetColor, SetAttribute, SetBackgroundColor, SetForegroundColor,
 };
@@ -824,14 +824,7 @@ impl Renderer {
             (SPINNER[self.spinner_frame as usize], None)
         } else if mode_label.starts_with("-- ") {
             // Vi mode: use short prefix, push mode label to status line
-            let prefix = match mode_label {
-                "-- INSERT --" => "i ",
-                "-- NORMAL --" => "> ",
-                "-- VISUAL --" => "v ",
-                "-- VISUAL LINE --" => "V ",
-                "-- VISUAL BLOCK --" => "b ",
-                _ => "> ",
-            };
+            let prefix = "> ";
             (prefix, Some(mode_label))
         } else if !mode_label.is_empty() {
             (mode_label, None)
@@ -1035,6 +1028,12 @@ impl Renderer {
             (rows.saturating_sub(3) - visible_line_count as u16 + 1) + cursor_render_idx as u16;
         let cursor_x = (prompt_width + cursor_display_col.saturating_sub(h_scroll)) as u16;
         stdout.execute(MoveTo(cursor_x, cursor_row))?;
+        // Vi-mode: block cursor in normal/visual, bar cursor in insert
+        if mode_label == "-- INSERT --" {
+            stdout.execute(SetCursorStyle::SteadyBar)?;
+        } else {
+            stdout.execute(SetCursorStyle::SteadyBlock)?;
+        }
         write!(stdout, "{}", Show)?;
         stdout.flush()?;
         Ok(())

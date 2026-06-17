@@ -298,9 +298,7 @@ impl ViState {
         // If we're at the first character of a word (previous char is whitespace
         // or we're at position 0), step back so we find the PREVIOUS word,
         // not this word.
-        if !chars[i].is_whitespace()
-            && (i == 0 || chars[i.saturating_sub(1)].is_whitespace())
-        {
+        if !chars[i].is_whitespace() && (i == 0 || chars[i.saturating_sub(1)].is_whitespace()) {
             if i > 0 {
                 i -= 1;
             }

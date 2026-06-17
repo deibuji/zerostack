@@ -1110,7 +1110,10 @@ fn motion_b_from_first_char_of_previous_word() {
     let buf = "hello world";
     // From first char of 'world', b should go to start of 'hello'
     let c = apply_motion(buf, 6, 1, "b", &vi).unwrap();
-    assert_eq!(c, 0, "b from start of 'world' should go to start of 'hello'");
+    assert_eq!(
+        c, 0,
+        "b from start of 'world' should go to start of 'hello'"
+    );
 }
 
 #[test]
@@ -1149,7 +1152,10 @@ fn motion_B_from_first_char_of_previous_word() {
     let vi = make_vi();
     let buf = "hello world";
     let c = apply_motion(buf, 6, 1, "B", &vi).unwrap();
-    assert_eq!(c, 0, "B from start of 'world' should go to start of 'hello'");
+    assert_eq!(
+        c, 0,
+        "B from start of 'world' should go to start of 'hello'"
+    );
 }
 
 #[test]

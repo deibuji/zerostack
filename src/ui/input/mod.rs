@@ -1429,18 +1429,60 @@ impl InputEditor {
 
         let count = self.vi_state.pending_count.max(1) as usize;
         self.vi_state.pending_count = 0;
+
+        // pending_g: wait for second 'g' to trigger 'gg'
+        if self.vi_state.pending_g {
+            self.vi_state.pending_g = false;
+            return match key.code {
+                KeyCode::Char('g') => {
+                    self.cursor =
+                        apply_motion(&self.buffer, self.cursor, count, "gg", &self.vi_state)
+                            .unwrap_or(self.cursor);
+                    None
+                }
+                _ => None,
+            };
+        }
+
+        // pending_fchar_dir: wait for target char (f/F/t/T prefix)
+        if self.vi_state.pending_fchar_dir.is_some() {
+            let dir = self.vi_state.pending_fchar_dir.take();
+            let is_t = self.vi_state.pending_fchar_is_t;
+            self.vi_state.pending_fchar_is_t = false;
+            if let KeyCode::Char(c) = key.code {
+                self.vi_state.last_fchar = Some(c);
+                self.vi_state.last_fchar_dir = dir;
+                self.vi_state.last_fchar_is_t = is_t;
+                let motion = match (dir, is_t) {
+                    (Some(Direction::Forward), true) => "t",
+                    (Some(Direction::Forward), false) => "f",
+                    (Some(Direction::Backward), true) => "T",
+                    (Some(Direction::Backward), false) => "F",
+                    _ => "f",
+                };
+                if let Some(c) =
+                    apply_motion(&self.buffer, self.cursor, count, motion, &self.vi_state)
+                {
+                    self.cursor = c;
+                }
+            }
+            return None;
+        }
+
         match key.code {
             KeyCode::Esc => {
                 self.vi_state.mode = ViMode::Normal;
                 self.vi_state.pending_op = None;
+                self.vi_state.pending_g = false;
                 self.update_vi_mode_label();
                 None
             }
 
-            // Motions extend selection
+            // Motions extend selection (via apply_motion so count is honored)
             KeyCode::Char('h') | KeyCode::Left => {
-                if self.cursor > 0 {
-                    self.cursor = prev_char_boundary(&self.buffer, self.cursor);
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "h", &self.vi_state)
+                {
+                    self.cursor = c;
                 }
                 None
             }
@@ -1459,13 +1501,21 @@ impl InputEditor {
                 None
             }
             KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => {
-                if self.cursor < self.buffer.len() {
-                    self.cursor = next_char_boundary(&self.buffer, self.cursor);
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "l", &self.vi_state)
+                {
+                    self.cursor = c;
                 }
                 None
             }
             KeyCode::Char('w') => {
                 if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "w", &self.vi_state)
+                {
+                    self.cursor = c;
+                }
+                None
+            }
+            KeyCode::Char('W') => {
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "W", &self.vi_state)
                 {
                     self.cursor = c;
                 }
@@ -1478,8 +1528,22 @@ impl InputEditor {
                 }
                 None
             }
+            KeyCode::Char('B') => {
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "B", &self.vi_state)
+                {
+                    self.cursor = c;
+                }
+                None
+            }
             KeyCode::Char('e') => {
                 if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "e", &self.vi_state)
+                {
+                    self.cursor = c;
+                }
+                None
+            }
+            KeyCode::Char('E') => {
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "E", &self.vi_state)
                 {
                     self.cursor = c;
                 }
@@ -1495,6 +1559,70 @@ impl InputEditor {
             }
             KeyCode::Char('^') => {
                 self.cursor = ViState::first_non_whitespace(&self.buffer, self.cursor);
+                None
+            }
+            KeyCode::Char('g') => {
+                self.vi_state.pending_g = true;
+                None
+            }
+            KeyCode::Char('G') => {
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "G", &self.vi_state)
+                {
+                    self.cursor = c;
+                }
+                None
+            }
+            KeyCode::Char('{') => {
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "{", &self.vi_state)
+                {
+                    self.cursor = c;
+                }
+                None
+            }
+            KeyCode::Char('}') => {
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "}", &self.vi_state)
+                {
+                    self.cursor = c;
+                }
+                None
+            }
+            KeyCode::Char('%') => {
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "%", &self.vi_state)
+                {
+                    self.cursor = c;
+                }
+                None
+            }
+            KeyCode::Char(';') => {
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, ";", &self.vi_state)
+                {
+                    self.cursor = c;
+                }
+                None
+            }
+            KeyCode::Char(',') => {
+                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, ",", &self.vi_state)
+                {
+                    self.cursor = c;
+                }
+                None
+            }
+            KeyCode::Char('f') => {
+                self.vi_state.pending_fchar_dir = Some(Direction::Forward);
+                None
+            }
+            KeyCode::Char('F') => {
+                self.vi_state.pending_fchar_dir = Some(Direction::Backward);
+                None
+            }
+            KeyCode::Char('t') => {
+                self.vi_state.pending_fchar_dir = Some(Direction::Forward);
+                self.vi_state.pending_fchar_is_t = true;
+                None
+            }
+            KeyCode::Char('T') => {
+                self.vi_state.pending_fchar_dir = Some(Direction::Backward);
+                self.vi_state.pending_fchar_is_t = true;
                 None
             }
 
