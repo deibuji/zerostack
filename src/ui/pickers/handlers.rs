@@ -34,6 +34,14 @@ pub fn handle_file_key(
             }
             true
         }
+        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            picker.select_prev();
+            true
+        }
+        KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            picker.select_next();
+            true
+        }
         KeyCode::Char(c) => {
             picker.char_input(c);
             buffer.insert(*cursor, c);
@@ -151,6 +159,14 @@ pub fn handle_command_key(
                 }
                 picker.deactivate();
             }
+            (true, None)
+        }
+        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            picker.select_prev();
+            (true, None)
+        }
+        KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            picker.select_next();
             (true, None)
         }
         KeyCode::Char(c) => {
@@ -329,6 +345,14 @@ pub fn handle_prefixed_key(
             }
             true
         }
+        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            picker.select_prev();
+            true
+        }
+        KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            picker.select_next();
+            true
+        }
         KeyCode::Char(c) => {
             picker.char_input(c);
             let byte_in_query = picker
@@ -449,6 +473,14 @@ pub fn handle_models_key(
                 }
                 picker.deactivate();
             }
+            true
+        }
+        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            picker.select_prev();
+            true
+        }
+        KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            picker.select_next();
             true
         }
         KeyCode::Char(c) => {
