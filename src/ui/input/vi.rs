@@ -604,12 +604,6 @@ impl ViState {
     }
 }
 
-#[derive(Clone)]
-pub struct ViMotionResult {
-    pub cursor: usize,
-    pub buffer: CompactString,
-}
-
 /// Apply a motion and return the new cursor position
 pub fn apply_motion(
     buf: &str,
@@ -618,8 +612,7 @@ pub fn apply_motion(
     motion: &str,
     vi: &ViState,
 ) -> Option<usize> {
-    let chars: Vec<char> = buf.chars().collect();
-    let len = chars.len();
+    let len = buf.len();
     let cnt = count.max(1);
 
     match motion {
@@ -734,6 +727,7 @@ pub fn apply_motion(
         }
         "%" => ViState::match_bracket(buf, cursor),
         "f" => {
+            let chars: Vec<char> = buf.chars().collect();
             if let Some(ch) = vi.last_fchar {
                 let mut c = cursor + 1;
                 let mut found = 0u32;
@@ -750,6 +744,7 @@ pub fn apply_motion(
             None
         }
         "F" => {
+            let chars: Vec<char> = buf.chars().collect();
             if let Some(ch) = vi.last_fchar {
                 if cursor == 0 {
                     return None;
@@ -772,6 +767,7 @@ pub fn apply_motion(
             None
         }
         "t" => {
+            let chars: Vec<char> = buf.chars().collect();
             if let Some(ch) = vi.last_fchar {
                 let mut c = cursor + 1;
                 let mut found = 0u32;
@@ -788,6 +784,7 @@ pub fn apply_motion(
             None
         }
         "T" => {
+            let chars: Vec<char> = buf.chars().collect();
             if let Some(ch) = vi.last_fchar {
                 if cursor == 0 {
                     return None;
@@ -876,13 +873,13 @@ pub fn apply_operator(
     count: u32,
     vi: &mut ViState,
 ) -> Option<(CompactString, usize, CompactString)> {
-    let motion_is_line = matches!(motion, "dd" | "cc" | "yy" | "D" | "C" | "S");
+    let motion_is_line = matches!(motion, "dd" | "cc" | "yy" | "D" | "C");
 
     if motion_is_line {
         let (line, _) = cursor_to_line_col(buf, cursor);
         let start = line_start(buf, cursor);
-        // For dd/cc/yy, delete the whole line including newline unless it's the last line
-        if motion == "D" || motion == "C" || motion == "S" {
+        // For D/C, delete from cursor to end of line
+        if motion == "D" || motion == "C" {
             let end = line_end(buf, cursor);
             match op {
                 ViOperator::Delete | ViOperator::Change => {

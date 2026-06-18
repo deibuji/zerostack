@@ -820,8 +820,10 @@ impl InputEditor {
             let old_buf =
                 std::mem::replace(&mut self.vi_state.insert_start_buf, self.buffer.clone());
             let old_cursor = self.vi_state.insert_start_cursor;
-            self.vi_state
-                .push_undo(&old_buf, &self.buffer, old_cursor, self.cursor);
+            if old_buf != self.buffer || old_cursor != self.cursor {
+                self.vi_state
+                    .push_undo(&old_buf, &self.buffer, old_cursor, self.cursor);
+            }
             self.vi_state.last_insert = Some(self.buffer[old_cursor..self.cursor].into());
             self.vi_state.mode = ViMode::Normal;
             self.vi_state.pending_op = None;
@@ -835,6 +837,32 @@ impl InputEditor {
     #[cfg(feature = "vi-mode")]
     /// Shared motion dispatch for normal and visual mode.
     /// Handles pending_prefixes (pending_g, pending_fchar_dir), key→motion
+    /// Map a KeyCode to a motion string for direct motions (no pending state).
+    fn key_to_motion(code: KeyCode) -> Option<&'static str> {
+        match code {
+            KeyCode::Char('h') | KeyCode::Left => Some("h"),
+            KeyCode::Char('j') => Some("j"),
+            KeyCode::Char('k') => Some("k"),
+            KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => Some("l"),
+            KeyCode::Char('w') => Some("w"),
+            KeyCode::Char('W') => Some("W"),
+            KeyCode::Char('b') => Some("b"),
+            KeyCode::Char('B') => Some("B"),
+            KeyCode::Char('e') => Some("e"),
+            KeyCode::Char('E') => Some("E"),
+            KeyCode::Char('$') | KeyCode::End => Some("$"),
+            KeyCode::Char('^') => Some("^"),
+            KeyCode::Home => Some("home"),
+            KeyCode::Char('G') => Some("G"),
+            KeyCode::Char('{') => Some("{"),
+            KeyCode::Char('}') => Some("}"),
+            KeyCode::Char('%') => Some("%"),
+            KeyCode::Char(';') => Some(";"),
+            KeyCode::Char(',') => Some(","),
+            _ => None,
+        }
+    }
+
     /// mapping, and applies the motion. Reads pending_count internally.
     /// Returns true if the key was consumed (motion handled or pending state set).
     fn handle_vi_motion(&mut self, key: KeyCode) -> bool {
@@ -881,60 +909,47 @@ impl InputEditor {
 
         // Map key to motion and apply
         // Only consume pending_count when the key is actually a motion
-        let motion = match key {
-            KeyCode::Char('h') | KeyCode::Left => "h",
-            KeyCode::Char('j') => "j",
-            KeyCode::Char('k') => "k",
-            KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => "l",
-            KeyCode::Char('w') => "w",
-            KeyCode::Char('W') => "W",
-            KeyCode::Char('b') => "b",
-            KeyCode::Char('B') => "B",
-            KeyCode::Char('e') => "e",
-            KeyCode::Char('E') => "E",
-            KeyCode::Char('$') | KeyCode::End => "$",
-            KeyCode::Char('^') => "^",
-            KeyCode::Home => "home",
-            KeyCode::Char('G') => "G",
-            KeyCode::Char('{') => "{",
-            KeyCode::Char('}') => "}",
-            KeyCode::Char('%') => "%",
-            KeyCode::Char(';') => ";",
-            KeyCode::Char(',') => ",",
-            // Keys that set pending state for next call (don't consume count yet)
-            KeyCode::Char('g') => {
-                self.vi_state.pending_g = true;
-                return true;
-            }
-            KeyCode::Char('f') => {
-                self.vi_state.pending_fchar_dir = Some(Direction::Forward);
-                return true;
-            }
-            KeyCode::Char('F') => {
-                self.vi_state.pending_fchar_dir = Some(Direction::Backward);
-                return true;
-            }
-            KeyCode::Char('t') => {
-                self.vi_state.pending_fchar_dir = Some(Direction::Forward);
-                self.vi_state.pending_fchar_is_t = true;
-                return true;
-            }
-            KeyCode::Char('T') => {
-                self.vi_state.pending_fchar_dir = Some(Direction::Backward);
-                self.vi_state.pending_fchar_is_t = true;
-                return true;
-            }
-            // 0 is a motion only when not accumulating a count
-            KeyCode::Char('0') => {
-                let count = self.vi_state.pending_count.max(1) as usize;
-                self.vi_state.pending_count = 0;
-                if let Some(c) = apply_motion(&self.buffer, self.cursor, count, "0", &self.vi_state)
-                {
-                    self.cursor = c;
+        let motion = match Self::key_to_motion(key) {
+            Some(m) => m,
+            None => {
+                match key {
+                    // Keys that set pending state for next call (don't consume count yet)
+                    KeyCode::Char('g') => {
+                        self.vi_state.pending_g = true;
+                        return true;
+                    }
+                    KeyCode::Char('f') => {
+                        self.vi_state.pending_fchar_dir = Some(Direction::Forward);
+                        return true;
+                    }
+                    KeyCode::Char('F') => {
+                        self.vi_state.pending_fchar_dir = Some(Direction::Backward);
+                        return true;
+                    }
+                    KeyCode::Char('t') => {
+                        self.vi_state.pending_fchar_dir = Some(Direction::Forward);
+                        self.vi_state.pending_fchar_is_t = true;
+                        return true;
+                    }
+                    KeyCode::Char('T') => {
+                        self.vi_state.pending_fchar_dir = Some(Direction::Backward);
+                        self.vi_state.pending_fchar_is_t = true;
+                        return true;
+                    }
+                    // 0 is a motion only when not accumulating a count
+                    KeyCode::Char('0') => {
+                        let count = self.vi_state.pending_count.max(1) as usize;
+                        self.vi_state.pending_count = 0;
+                        if let Some(c) =
+                            apply_motion(&self.buffer, self.cursor, count, "0", &self.vi_state)
+                        {
+                            self.cursor = c;
+                        }
+                        return true;
+                    }
+                    _ => return false,
                 }
-                return true;
             }
-            _ => return false,
         };
         let count = self.vi_state.pending_count.max(1) as usize;
         self.vi_state.pending_count = 0;
@@ -982,29 +997,10 @@ impl InputEditor {
             || self.vi_state.pending_g
             || self.vi_state.pending_fchar_dir.is_some()
         {
-            let motion = match key.code {
-                KeyCode::Char('h') | KeyCode::Left => Some("h"),
-                KeyCode::Char('j') => Some("j"),
-                KeyCode::Char('k') => Some("k"),
-                KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => Some("l"),
-                KeyCode::Char('w') => Some("w"),
-                KeyCode::Char('W') => Some("W"),
-                KeyCode::Char('b') => Some("b"),
-                KeyCode::Char('B') => Some("B"),
-                KeyCode::Char('e') => Some("e"),
-                KeyCode::Char('E') => Some("E"),
+            let motion = Self::key_to_motion(key.code).or(match key.code {
                 KeyCode::Char('0') if self.vi_state.pending_count == 0 => Some("0"),
-                KeyCode::Char('$') | KeyCode::End => Some("$"),
-                KeyCode::Char('^') => Some("^"),
-                KeyCode::Home => Some("home"),
-                KeyCode::Char('G') => Some("G"),
-                KeyCode::Char('{') => Some("{"),
-                KeyCode::Char('}') => Some("}"),
-                KeyCode::Char('%') => Some("%"),
-                KeyCode::Char(';') => Some(";"),
-                KeyCode::Char(',') => Some(","),
                 _ => None,
-            };
+            });
             if let Some(m) = motion {
                 self.apply_vi_motion_or_op(m);
                 return None;
@@ -1540,11 +1536,13 @@ impl InputEditor {
                 None
             }
             KeyCode::Char('>') => {
+                // ponytail: implement visual indent
                 self.vi_state.mode = ViMode::Normal;
                 self.update_vi_mode_label();
                 None
             }
             KeyCode::Char('<') => {
+                // ponytail: implement visual dedent
                 self.vi_state.mode = ViMode::Normal;
                 self.update_vi_mode_label();
                 None
