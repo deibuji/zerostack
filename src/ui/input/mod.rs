@@ -2021,7 +2021,7 @@ impl InputEditor {
 
 #[cfg(feature = "vi-mode")]
 fn extract_word_at_cursor(buf: &str, cursor: usize) -> Option<String> {
-    use crate::ui::input::cursor::next_char_boundary;
+    
     if buf.is_empty() || cursor >= buf.len() {
         return None;
     }
