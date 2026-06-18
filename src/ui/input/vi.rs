@@ -123,7 +123,10 @@ pub struct ViState {
     pub pending_op: Option<ViOperator>,
     pub pending_count: u32,
     pub pending_register: Option<char>,
-    pub pending_text_object: bool,
+    pub pending_text_object: Option<bool>,
+    pub pending_r_char: Option<char>,
+    pub last_visual_start: Option<usize>,
+    pub last_visual_end: Option<usize>,
     pub pending_g: bool,
     pub pending_fchar_dir: Option<Direction>,
     pub pending_fchar_is_t: bool,
@@ -155,7 +158,10 @@ impl ViState {
             pending_op: None,
             pending_count: 0,
             pending_register: None,
-            pending_text_object: false,
+            pending_text_object: None,
+            pending_r_char: None,
+            last_visual_start: None,
+            last_visual_end: None,
             pending_g: false,
             pending_fchar_dir: None,
             pending_fchar_is_t: false,
@@ -563,36 +569,33 @@ impl ViState {
             }
             TextObject::Tag => {
                 // Simple HTML/XML tag inner/outer
-                let text = &buf[..len];
-                // Find previous <, skipping > and closing tags
+                let bytes = buf.as_bytes();
+                // Find previous '<' scanning backward by bytes (safe: < > / are ASCII)
                 let mut start = cursor;
                 while start > 0 {
                     start -= 1;
-                    if chars[start] == '>' {
+                    if bytes[start] == b'>' {
                         continue;
                     }
-                    if chars[start] == '<' {
+                    if bytes[start] == b'<' {
                         // Skip closing tags (</...>)
-                        if start + 1 < len && chars[start + 1] == '/' {
+                        if start + 1 < buf.len() && bytes[start + 1] == b'/' {
                             continue;
                         }
                         // Found opening tag
-                        let tag_end = text[start..]
-                            .find('>')
-                            .map(|p| start + p + 1)
-                            .unwrap_or(len);
-                        // Find closing tag
-                        let tag_name = &text[start + 1..tag_end - 1]
-                            .split_whitespace()
-                            .next()
-                            .unwrap_or("");
-                        let close_tag = format!("</{}>", tag_name);
-                        if let Some(close_pos) = text[tag_end..].find(&close_tag) {
-                            let close_end = tag_end + close_pos + close_tag.len();
-                            if inner {
-                                return (tag_end, tag_end + close_pos);
-                            } else {
-                                return (start, close_end);
+                        let after_start = &buf[start..];
+                        if let Some(tag_end_rel) = after_start.find('>') {
+                            let tag_end_byte = start + tag_end_rel + 1;
+                            let tag_part = &buf[start + 1..tag_end_byte - 1];
+                            let tag_name = tag_part.split_whitespace().next().unwrap_or("");
+                            let close_tag = format!("</{}>", tag_name);
+                            if let Some(close_rel) = buf[tag_end_byte..].find(&close_tag) {
+                                let close_end = tag_end_byte + close_rel + close_tag.len();
+                                if inner {
+                                    return (tag_end_byte, tag_end_byte + close_rel);
+                                } else {
+                                    return (start, close_end);
+                                }
                             }
                         }
                         break;
@@ -957,7 +960,27 @@ pub fn apply_operator(
                 let saved = buf[start..end].into();
                 Some((new_buf, start, saved))
             }
-            _ => None,
+            ViOperator::IndentRight => {
+                let mut s = String::with_capacity(buf.len() + 2);
+                s.push_str(&buf[..start]);
+                s.push_str("  ");
+                s.push_str(&buf[start..]);
+                Some((CompactString::new(&s), cursor + 2, CompactString::new("")))
+            }
+            ViOperator::IndentLeft => {
+                if start + 2 <= buf.len() && &buf[start..start + 2] == "  " {
+                    let mut s = String::with_capacity(buf.len() - 2);
+                    s.push_str(&buf[..start]);
+                    s.push_str(&buf[start + 2..]);
+                    Some((
+                        CompactString::new(&s),
+                        cursor.saturating_sub(2),
+                        CompactString::new(""),
+                    ))
+                } else {
+                    Some((CompactString::new(buf), cursor, CompactString::new("")))
+                }
+            }
         }
     } else if let Some(target) = apply_motion(buf, cursor, count as usize, motion, vi) {
         let inclusive = motion == "e" || motion == "E";

@@ -1225,3 +1225,71 @@ fn motion_T_count_finds_nth() {
         "2nd T l from end should land after 2nd 'l'"
     );
 }
+
+// ---------------------------------------------------------------------------
+// IndentRight / IndentLeft with _ motion (>> / <<)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn op_indent_right_line() {
+    let mut vi = make_vi();
+    let (buf, cur, deleted) = apply_operator(
+        "hello\nworld\nfoo",
+        6,
+        ViOperator::IndentRight,
+        "_",
+        1,
+        &mut vi,
+    )
+    .unwrap();
+    assert_eq!(buf.as_str(), "hello\n  world\nfoo");
+    assert_eq!(cur, 8);
+    assert_eq!(deleted.as_str(), "");
+}
+
+#[test]
+fn op_indent_right_line_first_line() {
+    let mut vi = make_vi();
+    let (buf, cur, deleted) =
+        apply_operator("hello\nworld", 0, ViOperator::IndentRight, "_", 1, &mut vi).unwrap();
+    assert_eq!(buf.as_str(), "  hello\nworld");
+    assert_eq!(cur, 2);
+    assert_eq!(deleted.as_str(), "");
+}
+
+#[test]
+fn op_indent_left_line() {
+    let mut vi = make_vi();
+    let (buf, cur, deleted) =
+        apply_operator("  hello\nworld", 0, ViOperator::IndentLeft, "_", 1, &mut vi).unwrap();
+    assert_eq!(buf.as_str(), "hello\nworld");
+    assert_eq!(cur, 0);
+    assert_eq!(deleted.as_str(), "");
+}
+
+#[test]
+fn op_indent_left_line_no_indent() {
+    let mut vi = make_vi();
+    let (buf, cur, deleted) =
+        apply_operator("hello\nworld", 0, ViOperator::IndentLeft, "_", 1, &mut vi).unwrap();
+    assert_eq!(buf.as_str(), "hello\nworld");
+    assert_eq!(cur, 0);
+    assert_eq!(deleted.as_str(), "");
+}
+
+#[test]
+fn op_indent_right_and_left_twice() {
+    let mut vi = make_vi();
+    let (buf, cur, _) =
+        apply_operator("hello", 0, ViOperator::IndentRight, "_", 1, &mut vi).unwrap();
+    assert_eq!(buf.as_str(), "  hello");
+    assert_eq!(cur, 2);
+    let (buf2, cur2, _) =
+        apply_operator(&buf, cur, ViOperator::IndentRight, "_", 1, &mut vi).unwrap();
+    assert_eq!(buf2.as_str(), "    hello");
+    assert_eq!(cur2, 4);
+    let (buf3, cur3, _) =
+        apply_operator(&buf2, cur2, ViOperator::IndentLeft, "_", 1, &mut vi).unwrap();
+    assert_eq!(buf3.as_str(), "  hello");
+    assert_eq!(cur3, 2);
+}
