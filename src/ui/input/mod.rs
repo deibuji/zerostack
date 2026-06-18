@@ -947,11 +947,9 @@ impl InputEditor {
     #[cfg(feature = "vi-mode")]
     fn handle_vi_normal_key(&mut self, key: KeyEvent) -> Option<CompactString> {
         // Arrow keys and Ctrl+N/P navigate history in all modes
-        if matches!(
-            key.code,
-            KeyCode::Up | KeyCode::Down
-        ) || (matches!(key.code, KeyCode::Char('n') | KeyCode::Char('p'))
-            && key.modifiers.contains(KeyModifiers::CONTROL))
+        if matches!(key.code, KeyCode::Up | KeyCode::Down)
+            || (matches!(key.code, KeyCode::Char('n') | KeyCode::Char('p'))
+                && key.modifiers.contains(KeyModifiers::CONTROL))
         {
             return self.handle_key_impl(key);
         }
@@ -1463,11 +1461,9 @@ impl InputEditor {
     #[cfg(feature = "vi-mode")]
     fn handle_vi_visual_key(&mut self, key: KeyEvent) -> Option<CompactString> {
         // Arrow keys and Ctrl+N/P navigate history in all modes
-        if matches!(
-            key.code,
-            KeyCode::Up | KeyCode::Down
-        ) || (matches!(key.code, KeyCode::Char('n') | KeyCode::Char('p'))
-            && key.modifiers.contains(KeyModifiers::CONTROL))
+        if matches!(key.code, KeyCode::Up | KeyCode::Down)
+            || (matches!(key.code, KeyCode::Char('n') | KeyCode::Char('p'))
+                && key.modifiers.contains(KeyModifiers::CONTROL))
         {
             return self.handle_key_impl(key);
         }
